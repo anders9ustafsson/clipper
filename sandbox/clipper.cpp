@@ -305,8 +305,8 @@ bool Orientation(const Polygon &poly)
   if (highI < 2) return false;
   bool UseFullInt64Range = false;
 
-    int j = 0, jplus, jminus;
-    for (int i = 0; i <= highI; ++i)
+  int j = 0, jplus, jminus;
+  for (int i = 0; i <= highI; ++i)
   {
     if (Abs(poly[i].X) > hiRange || Abs(poly[i].Y) > hiRange)
     throw "Coordinate exceeds range bounds.";
@@ -1332,9 +1332,15 @@ void Clipper::SetWindingCount(TEdge &edge)
     edge.windCnt = edge.windDelta;
     edge.windCnt2 = 0;
     e = m_ActiveEdges; //ie get ready to calc windCnt2
-  } else if ( IsNonZeroFillType(edge) )
+  } else if ( IsEvenOddFillType(edge) )
   {
-    //nonZero filling ...
+    //EvenOdd filling ...
+    edge.windCnt = 1;
+    edge.windCnt2 = e->windCnt2;
+    e = e->nextInAEL; //ie get ready to calc windCnt2
+  } else
+  {
+    //nonZero, Positive or Negative filling ...
     if ( e->windCnt * e->windDelta < 0 )
     {
       if (Abs(e->windCnt) > 1)
@@ -1353,65 +1359,120 @@ void Clipper::SetWindingCount(TEdge &edge)
     }
     edge.windCnt2 = e->windCnt2;
     e = e->nextInAEL; //ie get ready to calc windCnt2
-  } else
-  {
-    //even-odd filling ...
-    edge.windCnt = 1;
-    edge.windCnt2 = e->windCnt2;
-    e = e->nextInAEL; //ie get ready to calc windCnt2
   }
 
   //update windCnt2 ...
-  if ( IsNonZeroAltFillType(edge) )
+  if ( IsEvenOddAltFillType(edge) )
   {
-    //nonZero filling ...
-    while ( e != &edge )
-    {
-      edge.windCnt2 += e->windDelta;
-      e = e->nextInAEL;
-    }
-  } else
-  {
-    //even-odd filling ...
+    //EvenOdd filling ...
     while ( e != &edge )
     {
       edge.windCnt2 = (edge.windCnt2 == 0) ? 1 : 0;
       e = e->nextInAEL;
     }
+  } else
+  {
+    //nonZero, Positive or Negative filling ...
+    while ( e != &edge )
+    {
+      edge.windCnt2 += e->windDelta;
+      e = e->nextInAEL;
+    }
   }
 }
 //------------------------------------------------------------------------------
 
-bool Clipper::IsNonZeroFillType(const TEdge& edge) const
+bool Clipper::IsEvenOddFillType(const TEdge& edge) const
 {
   if (edge.polyType == ptSubject)
-    return m_SubjFillType == pftNonZero; else
-    return m_ClipFillType == pftNonZero;
+    return m_SubjFillType == pftEvenOdd; else
+    return m_ClipFillType == pftEvenOdd;
 }
 //------------------------------------------------------------------------------
 
-bool Clipper::IsNonZeroAltFillType(const TEdge& edge) const
+bool Clipper::IsEvenOddAltFillType(const TEdge& edge) const
 {
   if (edge.polyType == ptSubject)
-    return m_ClipFillType == pftNonZero; else
-    return m_SubjFillType == pftNonZero;
+    return m_ClipFillType == pftEvenOdd; else
+    return m_SubjFillType == pftEvenOdd;
 }
 //------------------------------------------------------------------------------
 
 bool Clipper::IsContributing(const TEdge& edge) const
 {
-  switch( m_ClipType ){
-    case ctIntersection:
-        return Abs(edge.windCnt) == 1 && edge.windCnt2 != 0;
-    case ctUnion:
-      return Abs(edge.windCnt) == 1 && edge.windCnt2 == 0;
-    case ctDifference:
-      if ( edge.polyType == ptSubject )
-        return Abs(edge.windCnt) == 1 && edge.windCnt2 == 0; else
-        return Abs(edge.windCnt) == 1 && edge.windCnt2 != 0;
-    default: //case ctXor:
-      return Abs(edge.windCnt) == 1;
+  PolyFillType pft, pft2;
+  if (edge.polyType == ptSubject)
+  {
+    pft = m_SubjFillType;
+    pft2 = m_ClipFillType;
+  } else
+  {
+    pft = m_ClipFillType;
+    pft2 = m_SubjFillType;
   }
+
+  switch(pft)
+  {
+    case pftEvenOdd: 
+    case pftNonZero:
+      if (Abs(edge.windCnt) != 1) return false;
+      break;
+    case pftPositive: 
+      if (edge.windCnt != 1) return false;
+      break;
+    default: //pftNegative
+      if (edge.windCnt != -1) return false;
+  }
+
+  switch(m_ClipType)
+  {
+    case ctIntersection:
+      switch(pft2)
+      {
+        case pftEvenOdd: 
+        case pftNonZero: 
+          return (edge.windCnt2 != 0);
+        case pftPositive: 
+          return (edge.windCnt2 > 0);
+        default: 
+          return (edge.windCnt2 < 0);
+      }
+    case ctUnion:
+      switch(pft2)
+      {
+        case pftEvenOdd: 
+        case pftNonZero: 
+          return (edge.windCnt2 == 0);
+        case pftPositive: 
+          return (edge.windCnt2 <= 0);
+        default: 
+          return (edge.windCnt2 >= 0);
+      }
+    case ctDifference:
+      if (edge.polyType == ptSubject)
+        switch(pft2)
+        {
+          case pftEvenOdd: 
+          case pftNonZero: 
+            return (edge.windCnt2 == 0);
+          case pftPositive: 
+            return (edge.windCnt2 <= 0);
+          default: 
+            return (edge.windCnt2 >= 0);
+        }
+      else
+        switch(pft2)
+        {
+          case pftEvenOdd: 
+          case pftNonZero: 
+            return (edge.windCnt2 != 0);
+          case pftPositive: 
+            return (edge.windCnt2 > 0);
+          default: 
+            return (edge.windCnt2 < 0);
+        }
+  }
+  return true;
 }
 //------------------------------------------------------------------------------
 
@@ -1536,12 +1597,14 @@ void Clipper::InsertLocalMinimaIntoAEL( const long64 botY)
     InsertScanbeam( lb->ytop );
     InsertEdgeIntoAEL( rb );
 
-    if ( IsNonZeroFillType( *lb) )
-      rb->windDelta = -lb->windDelta;
-    else
+    if (IsEvenOddFillType(*lb))
     {
       lb->windDelta = 1;
       rb->windDelta = 1;
+    }
+    else
+    {
+      rb->windDelta = -lb->windDelta;
     }
     SetWindingCount( *lb );
     rb->windCnt = lb->windCnt;
@@ -1648,32 +1711,66 @@ void Clipper::IntersectEdges(TEdge *e1, TEdge *e2,
   //assumes that e1 will be to the right of e2 ABOVE the intersection
   if ( e1->polyType == e2->polyType )
   {
-    if ( IsNonZeroFillType( *e1) )
+    if ( IsEvenOddFillType( *e1) )
+    {
+      int oldE1WindCnt = e1->windCnt;
+      e1->windCnt = e2->windCnt;
+      e2->windCnt = oldE1WindCnt;
+    } else
     {
       if (e1->windCnt + e2->windDelta == 0 ) e1->windCnt = -e1->windCnt;
       else e1->windCnt += e2->windDelta;
       if ( e2->windCnt - e1->windDelta == 0 ) e2->windCnt = -e2->windCnt;
       else e2->windCnt -= e1->windDelta;
-    } else
-    {
-      int oldE1WindCnt = e1->windCnt;
-      e1->windCnt = e2->windCnt;
-      e2->windCnt = oldE1WindCnt;
     }
   } else
   {
-    if ( IsNonZeroFillType(*e2) ) e1->windCnt2 += e2->windDelta;
+    if (!IsEvenOddFillType(*e2)) e1->windCnt2 += e2->windDelta;
     else e1->windCnt2 = ( e1->windCnt2 == 0 ) ? 1 : 0;
-    if ( IsNonZeroFillType(*e1) ) e2->windCnt2 -= e1->windDelta;
+    if (!IsEvenOddFillType(*e1)) e2->windCnt2 -= e1->windDelta;
     else e2->windCnt2 = ( e2->windCnt2 == 0 ) ? 1 : 0;
   }
 
   long64 e1Wc = Abs(e1->windCnt);
   long64 e2Wc = Abs(e2->windCnt);
 
+  PolyFillType e1FillType, e2FillType, e1FillType2, e2FillType2;
+  if (e1->polyType == ptSubject)
+  {
+    e1FillType = m_SubjFillType;
+    e1FillType2 = m_ClipFillType;
+  } else
+  {
+    e1FillType = m_ClipFillType;
+    e1FillType2 = m_SubjFillType;
+  }
+  if (e2->polyType == ptSubject)
+  {
+    e2FillType = m_SubjFillType;
+    e2FillType2 = m_ClipFillType;
+  } else
+  {
+    e2FillType = m_ClipFillType;
+    e2FillType2 = m_SubjFillType;
+  }
+
+  switch (e1FillType)
+  {
+    case pftPositive: e1Wc = e1->windCnt; break;
+    case pftNegative: e1Wc = -e1->windCnt; break;
+    default: e1Wc = abs(e1->windCnt);
+  }
+  switch(e2FillType)
+  {
+    case pftPositive: e2Wc = e2->windCnt; break;
+    case pftNegative: e2Wc = -e2->windCnt; break;
+    default: e2Wc = abs(e2->windCnt);
+  }
+
   if ( e1Contributing && e2contributing )
   {
-    if ( e1stops || e2stops || e1Wc > 1 || e2Wc > 1 ||
+    if ( e1stops || e2stops || 
+      (e1Wc != 0 && e1Wc != 1) || (e2Wc != 0 && e2Wc != 1) ||
       (e1->polyType != e2->polyType && m_ClipType != ctXor) )
         AddLocalMaxPoly(e1, e2, pt); 
     else
@@ -1681,25 +1778,42 @@ void Clipper::IntersectEdges(TEdge *e1, TEdge *e2,
   }
   else if ( e1Contributing )
   {
-    if (e2Wc < 2 && (m_ClipType != ctIntersection || 
+    if ((e2Wc == 0 || e2Wc == 1) && 
+      (m_ClipType != ctIntersection || 
       e2->polyType == ptSubject || (e2->windCnt2 != 0))) 
         DoEdge1(e1, e2, pt);
   }
   else if ( e2contributing )
   {
-    if (e1Wc < 2 && (m_ClipType != ctIntersection || 
+    if ((e1Wc == 0 || e1Wc == 1) && 
+      (m_ClipType != ctIntersection || 
       e1->polyType == ptSubject || (e1->windCnt2 != 0))) 
         DoEdge2(e1, e2, pt);
   } 
-  else if ( e1Wc < 2 && e2Wc < 2 && !e1stops && !e2stops )
+  else if ( (e1Wc == 0 || e1Wc == 1) && 
+    (e2Wc == 0 || e2Wc == 1) && !e1stops && !e2stops )
   {
+    long64 e1Wc2, e2Wc2;
+    switch (e1FillType2)
+    {
+      case pftPositive: e1Wc2 = e1->windCnt2; break;
+      case pftNegative : e1Wc2 = -e1->windCnt2; break;
+      default: e1Wc2 = abs(e1->windCnt2);
+    }
+    switch (e2FillType2)
+    {
+      case pftPositive: e2Wc2 = e2->windCnt2; break;
+      case pftNegative: e2Wc2 = -e2->windCnt2; break;
+      default: e2Wc2 = abs(e2->windCnt2);
+    }
+
     //neither edge is currently contributing ...
-    if ( e1->polyType != e2->polyType )
+    if (e1->polyType != e2->polyType)
         AddLocalMinPoly(e1, e2, pt);
     else if (e1Wc == 1 && e2Wc == 1)
       switch( m_ClipType ) {
         case ctIntersection:
-          if ( Abs(e1->windCnt2) > 0 && Abs(e2->windCnt2) > 0 )
+          if (e1Wc2 > 0 && e2Wc2 > 0)
             AddLocalMinPoly(e1, e2, pt);
           break;
         case ctUnion:
@@ -1707,9 +1821,11 @@ void Clipper::IntersectEdges(TEdge *e1, TEdge *e2,
             AddLocalMinPoly(e1, e2, pt);
           break;
         case ctDifference:
-          if ( (e1->polyType == ptClip && e1->windCnt2 != 0 && e2->windCnt2 != 0) ||
-            (e1->polyType == ptSubject && e1->windCnt2 == 0 && e2->windCnt2 == 0) )
-              AddLocalMinPoly(e1, e2, pt);
+          if ((e1->polyType == ptClip && e2->polyType == ptClip && 
+              e1Wc2 > 0 && e2Wc2 > 0) || 
+              (e1->polyType == ptSubject && e2->polyType == ptSubject && 
+              e1->windCnt2 == 0 && e2->windCnt2 == 0)) 
+                AddLocalMinPoly(e1, e2, pt);
           break;
         case ctXor:
           AddLocalMinPoly(e1, e2, pt);
@@ -1795,13 +1911,10 @@ void Clipper::AppendPolygon(TEdge *e1, TEdge *e2)
   OutRec *holeStateRec = GetLowermostRec(outRec1, outRec2);
 
   //fixup hole status ...
-  if (outRec1->isHole != outRec2->isHole)
-  {
-    if (holeStateRec == outRec2)
-      outRec1->isHole = outRec2->isHole;
-    else
-      outRec2->isHole = outRec1->isHole;
-  }
+  if (holeStateRec == outRec2)
+    outRec1->isHole = outRec2->isHole;
+  else
+    outRec2->isHole = outRec1->isHole;
 
   OutPt* p1_lft = outRec1->pts;
   OutPt* p1_rt = p1_lft->prev;
@@ -3125,10 +3238,7 @@ void DoRound(Polygons::size_type i, int j)
     IntPoint pt2 = IntPoint((long64)Round(m_p[i][j].X + normals[k].X * m_delta),
         (long64)Round(m_p[i][j].Y + normals[k].Y * m_delta));
     AddPoint(pt1);
-    //round off reflex angles (ie > 180 deg) unless it's
-    //almost flat (ie < 10deg angle).
-    //cross product normals < 0 -> angle > 180 deg.
-    //dot product normals == 1 -> no angle
+    //round off reflex angles (ie > 180 deg) unless almost flat (ie < 10deg).
     if ((normals[j].X*normals[k].Y - normals[k].X*normals[j].Y) * m_delta >= 0 &&
       (normals[k].X * normals[j].X + normals[k].Y * normals[j].Y) < 0.985)
     {
