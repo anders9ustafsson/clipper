@@ -10,7 +10,7 @@ program
 
 uses
  SysUtils ,
-
+ 
  agg_basics ,
  agg_platform_support ,
 
@@ -40,15 +40,13 @@ uses
  agg_conv_stroke ,
  agg_conv_transform ,
  agg_conv_clip_polygon ,
+ agg_conv_clipper ,
  agg_gsv_text ,
  agg_trans_affine ,
  agg_vertex_source ,
 
  make_gb_poly_ ,
- make_arrows_,
-
- agg_conv_clipper,
- clipper in '../clipper.pas';
+ make_arrows_ ;
 
 {$I agg_mode.inc }
 

@@ -22,53 +22,6 @@ uses
   GR32_Misc, clipper;
 
 type
-
-  //SVG Builder structures ////////////////////////////////////////
-
-  TStyleInfo = record
-    pft: TPolyFillType;
-    brushClr: TColor32;
-    penClr: TColor32;
-    dashArray: TArrayOfInteger;
-    penWidth: double;
-    showCoords: boolean;
-  end;
-
-  TPolyInfo = record
-    polygons: TPolygons;
-    si: TStyleInfo;
-  end;
-  TPolyInfos = array of TPolyInfo;
-
-  TTextInfo = record
-    text: string;
-    x,y: integer;
-    fontName: string;
-    fontSize: integer;
-    fontColor: string;
-  end;
-  TTextInfos = array of TTextInfo;
-
-  /////////////////////////////////////////////////////////////////
-
-  TSvgBuilder = class
-  private
-    polyList: TPolyInfos;
-    textList: TTextInfos;
-    function Color32ToHtml(clr: TColor32): string;
-  public
-    fontName: string;
-    fontSize: integer;
-    fontColor: TColor32;
-    style: TStyleInfo;
-    constructor Create;
-    procedure Clear;
-    procedure AddPolygons(const poly: TPolygons);
-    procedure AddText(const text: string; X,Y: integer);
-    function SaveToFile(filename: string;
-      scale: double = 1.0; margin: integer = 10): boolean;
-  end;
-
   TMainForm = class(TForm)
     Panel1: TPanel;
     StatusBar1: TStatusBar;
@@ -80,6 +33,7 @@ type
     rbXOR: TRadioButton;
     rbStatic: TRadioButton;
     bExit: TButton;
+    Timer1: TTimer;
     rbNone: TRadioButton;
     gbRandom: TGroupBox;
     lblSubjCount: TLabel;
@@ -88,6 +42,8 @@ type
     tbClip: TTrackBar;
     rbRandom1: TRadioButton;
     bNext: TButton;
+    bStart: TButton;
+    bStop: TButton;
     tbClipOpacity: TTrackBar;
     lblClipOpacity: TLabel;
     lblSubjOpacity: TLabel;
@@ -98,11 +54,13 @@ type
     bSaveSvg: TButton;
     SaveDialog1: TSaveDialog;
     procedure FormCreate(Sender: TObject);
+    procedure FormDestroy(Sender: TObject);
     procedure ImgView321Resize(Sender: TObject);
     procedure rbIntersectionClick(Sender: TObject);
     procedure FormResize(Sender: TObject);
     procedure tbSubjChange(Sender: TObject);
     procedure bNextClick(Sender: TObject);
+    procedure Timer1Timer(Sender: TObject);
     procedure bExitClick(Sender: TObject);
     procedure tbClipOpacityChange(Sender: TObject);
     procedure rbStaticClick(Sender: TObject);
@@ -111,6 +69,8 @@ type
     procedure FormMouseWheel(Sender: TObject; Shift: TShiftState;
       WheelDelta: Integer; MousePos: TPoint; var Handled: Boolean);
     procedure FormKeyPress(Sender: TObject; var Key: Char);
+    procedure bStartClick(Sender: TObject);
+    procedure bStopClick(Sender: TObject);
     procedure bSaveSvgClick(Sender: TObject);
   private
     offsetMul2: integer;
@@ -129,87 +89,36 @@ var
 
 implementation
 
-//------------------------------------------------------------------------------
-// TSvgBuilder
-//------------------------------------------------------------------------------
-
-constructor TSvgBuilder.Create;
-begin
-  fontName := 'Verdana';
-  fontSize := 12;
-  fontColor := clBlack32;
-  style.brushClr := clWhite32;
-  style.penClr := clBlack32;
-  style.penWidth := 1.5;
-end;
-//------------------------------------------------------------------------------
-
-procedure TSvgBuilder.Clear;
-begin
-  polyList := nil;
-  textList := nil;
-end;
-//------------------------------------------------------------------------------
-
-function TSvgBuilder.Color32ToHtml(clr: TColor32): string;
-begin
-  with TColor32Entry(clr) do
-    result := format('#%.2x%.2x%.2x', [R, G, B]) ;
-end;
-//------------------------------------------------------------------------------
-
-function IntArrayToStr(a: TArrayOfInteger; scale: double = 1.0;
-  dx: integer = 0; dy: integer = 0): string;
-var
-  i: integer;
-begin
-  result := format('%1.1n',[a[0] * scale + dx]);
-  for i := 1 to high(a) do
-    if odd(i) then
-      result := result + format(', %1.1n',[a[i] * scale + dy]) else
-      result := result + format(', %1.1n',[a[i] * scale + dx]);
-end;
-//------------------------------------------------------------------------------
-
-procedure TSvgBuilder.AddPolygons(const poly: TPolygons);
-var
-  i, len: integer;
-begin
-  i := length(poly);
-  if i = 0 then Exit;
-  len := length(polyList);
-  setlength(polyList, len+1);
-  setlength(polyList[len].polygons, i);
-  for i := 0 to i-1 do
-    polyList[len].polygons[i] := Copy(poly[i], 0, MaxInt);
-  polyList[len].si.pft := style.pft;
-  polyList[len].si.brushClr := style.brushClr;
-  polyList[len].si.penClr := style.penClr;
-  polyList[len].si.dashArray := copy(style.dashArray, 0, maxint);
-  polyList[len].si.penWidth := style.penWidth;
-  polyList[len].si.showCoords := style.showCoords;
-end;
-//------------------------------------------------------------------------------
-
-procedure TSvgBuilder.AddText(const text: string; X,Y: integer);
-var
-  len: integer;
-begin
-  len := length(textList);
-  setlength(textList, len +1);
-  textList[len].text := text;
-  textList[len].x := X;
-  textList[len].y := Y;
-  textList[len].fontName := fontName;
-  textList[len].fontSize := fontSize;
-  textList[len].fontColor := Color32ToHtml(fontColor);
-end;
-//------------------------------------------------------------------------------
-
-function TSvgBuilder.SaveToFile(filename: string;
-  scale: double = 1.0; margin: integer = 10): boolean;
 const
-  pft_string: array[TPolyFillType] of string = ('evenodd', 'nonzero', 'positive', 'negative');
+  subjPenColor: TColor32 = $60C3C9CF;
+  subjBrushColor: TColor32 = $00DDDDF0;
+  clipPenColor: TColor32 = $30F9BEA6;
+  clipBrushColor: TColor32 = $00FFE0E0;
+  solPenColor: TColor32 = $7F003300;
+  solBrushColor: TColor32 = $8066EF7F;
+
+var
+  scale: integer = 1; //scale bitmap to X decimal places
+  subj: TArrayOfArrayOfFloatPoint = nil;
+  clip: TArrayOfArrayOfFloatPoint = nil;
+  subjI: TArrayOfArrayOfIntPoint = nil;
+  clipI: TArrayOfArrayOfIntPoint = nil;
+  solution: TArrayOfArrayOfFloatPoint = nil;
+  solutionI: TArrayOfArrayOfIntPoint = nil;
+  subjOpacity: cardinal = $FF000000;
+  clipOpacity: cardinal = $FF000000;
+
+{$R *.dfm}
+{$R polygons.res}
+
+//------------------------------------------------------------------------------
+
+procedure PolygonsToSVG(const filename: string;
+  const subj, clip, solution: TArrayOfArrayOfIntPoint;
+  subjFill, clipFill: TPolyFillType;
+  scale: double = 1.0; margin: integer = 10);
+const
+  pft_string: array[boolean] of string = ('evenodd', 'nonzero');
   svg_xml_start: array [0..1] of string =
     ('<?xml version="1.0" standalone="no"?>'+#10+
      '<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"'+#10+
@@ -218,52 +127,52 @@ const
   poly_start: string = ' <path d="';
   svg_xml_end: string = '</svg>'+#10;
 var
-  i,j,k,len,len2: integer;
-  offsetX, offsetY: Int64;
+  i, j, k: integer;
   rec: TIntRect;
+  firstPending: boolean;
+  offsetX, offsetY: Int64;
   ds: char;
   ss: TStringStream;
-  dashArrayStr: string;
+  polys: array [0..2] of TArrayOfArrayOfIntPoint;
 begin
-  result := false;
-  len := length(polyList);
-  if len = 0 then Exit;
-
-  if (scale = 0) then scale := 1.0;
-  if (margin < 0) then margin := 0;
-  i := 0; j := 0;
-  //calculate the bounding rect (skipping empty polygons) ...
-  while i < len do
-  begin
-    len2 := length(polyList[i].polygons);
-    j := 0;
-    while (j < len2) and (length(polyList[i].polygons[j]) < 3) do inc(j);
-    if j < len2 then Break;
-    inc(i);
-  end;
-  if i = len then Exit;
-  rec.left := polyList[i].polygons[j][0].X;
-  rec.right := rec.left;
-  rec.top := polyList[i].polygons[j][0].Y;
-  rec.bottom := rec.top;
-  for i := i to len -1 do
-    for j := 0 to length(polyList[i].polygons) -1 do
-      for k := 0 to length(polyList[i].polygons[j]) -1 do
-        with polyList[i].polygons[j][k] do
-      begin
-        if X < rec.left then rec.left := X
-        else if X > rec.right then rec.right := X;
-        if Y < rec.top then rec.top := Y
-        else if Y > rec.bottom then rec.bottom := Y;
-      end;
-  rec.left := round(rec.left * scale);
-  rec.top := round(rec.top * scale);
-  rec.right := round(rec.right * scale);
-  rec.bottom := round(rec.bottom * scale);
-  offsetX := -rec.left + margin;
-  offsetY := -rec.top + margin;
+  polys[0] := subj; polys[1] := clip; polys[2] := solution;
 
   ds := DecimalSeparator;
+  firstPending := true;
+  i := 0;
+  while i < 3 do
+  begin
+    if assigned(polys[i]) then
+      for j := 0 to high(polys[i]) do
+        if length(polys[i][j]) > 2 then
+          with polys[i][j][0] do
+          begin
+            rec.left := X;
+            rec.right := X;
+            rec.top := Y;
+            rec.bottom := Y;
+            firstPending := false;
+          end;
+    if firstPending then inc(i) else break;
+  end;
+  if firstPending then exit;
+
+  for i := i to 2 do
+    if assigned(polys[i]) then
+      for j := 0 to high(polys[i]) do
+        for k := 0 to high(polys[i][j]) do
+          with polys[i][j][k] do
+          begin
+            if X < rec.left then rec.left := X;
+            if X > rec.right then rec.right := X;
+            if Y < rec.top then rec.top := Y;
+            if Y > rec.bottom then rec.bottom := Y;
+          end;
+
+  if scale = 0 then scale := 1;
+  offsetX := round(-rec.left * scale)+ margin;
+  offsetY := round(-rec.top * scale)+ margin;
+
   DecimalSeparator := '.';
   ss := TStringStream.Create('');
   try
@@ -276,63 +185,62 @@ begin
       (rec.bottom - rec.top) + margin*2,
       svg_xml_start[1]]));
 
-    for i := 0 to len -1 do
-      if assigned(polyList[i].polygons) then
+    for i := 0 to 2 do
+    begin
+      if assigned(polys[i]) then
       begin
         ss.WriteString(poly_start);
-        for j := 0 to high(polyList[i].polygons) do
+        for j := 0 to high(polys[i]) do
         begin
-          if (length(polyList[i].polygons[j]) < 3) then continue;
-          with polyList[i].polygons[j][0] do
-            ss.WriteString( format(' M %1.2f %1.2f',
+          if (length(polys[i][j]) < 3) then continue;
+          with polys[i][j][0] do ss.WriteString( format(' M %1.2f %1.2f',
             [X * scale + offsetX, Y * scale + offsetY]));
-          for k := 1 to high(polyList[i].polygons[j]) do
-            with polyList[i].polygons[j][k] do
-              ss.WriteString( format(' L %1.2f %1.2f',
-                [X * scale + offsetX, Y * scale + offsetY]));
+          for k := 1 to high(polys[i][j]) do
+            with polys[i][j][k] do ss.WriteString( format(' L %1.2f %1.2f',
+              [X * scale + offsetX, Y * scale + offsetY]));
           ss.WriteString(' z');
         end;
 
-        with polyList[i].si do
-        begin
-          if length(dashArray) > 1 then
-            dashArrayStr := 'stroke-dasharray:'+ IntArrayToStr(dashArray) +';'
-          else
-            dashArrayStr := '';
-          ss.WriteString(format('"'#10+
-            ' style="fill:%s; fill-opacity:%1.2n; fill-rule:%s;'#10+
-            ' stroke:%s; stroke-opacity:%1.2n; %s stroke-width:%1.2n;"/>'#10#10,
-              [Color32ToHtml(brushClr), AlphaComponent(brushClr)/255,
-              pft_string[pft], Color32ToHtml(penClr), AlphaComponent(penClr)/255,
-              dashArrayStr, penWidth]));
-        end;
-
-        if polyList[i].si.showCoords then
-        begin
-          ss.WriteString('<g font-family="Verdana" font-size="11" fill="black">'#10#10);
-          for j := 0 to high(polyList[i].polygons) do
-          begin
-            if (length(polyList[i].polygons[j]) < 3) then continue;
-            for k := 0 to high(polyList[i].polygons[j]) do
-              with polyList[i].polygons[j][k] do
-                ss.WriteString(format('<text x="%1.0n" y="%1.0n">%1.0n,%1.0n</text>'#10,
-                  [X * scale + offsetX,  Y * scale + offsetY, X, Y]));
-            ss.WriteString(#10);
-          end;
-          ss.WriteString('</g>'#10);
+        case i of
+          0:
+            begin
+              ss.WriteString(format('"'#10+
+                ' style="fill:%s; fill-opacity:%1.2n; fill-rule:%s;'#10+
+                ' stroke:%s; stroke-opacity:%1.2n; stroke-width:%1.2n;"/>'#10#10,
+                  ['#0000ff'{fill color},
+                  0.062     {fill opacity},
+                  pft_string[subjFill = pftNonZero],
+                  '#0099ff' {stroke color},
+                  0.5       {stroke opacity},
+                  0.8       {stroke width} ]));
+            end;
+          1:
+            begin
+              ss.WriteString(format('"'#10+
+                ' style="fill:%s; fill-opacity:%1.2n; fill-rule:%s;'#10+
+                ' stroke:%s; stroke-opacity:%1.2n; stroke-width:%1.2n;"/>'#10#10,
+                  ['#ffff00'{fill color},
+                  0.062     {fill opacity},
+                  pft_string[clipFill = pftNonZero],
+                  '#ff9900' {stroke color},
+                  0.5       {stroke opacity},
+                  0.8       {stroke width} ]));
+            end;
+          2:
+            begin
+              ss.WriteString(format('"'#10+
+                ' style="fill:%s; fill-opacity:%1.2n; fill-rule:%s;'#10+
+                ' stroke:%s; stroke-opacity:%1.2n; stroke-width:%1.2n;"/>'#10#10,
+                  ['#00ff00'{fill color},
+                  0.125     {fill opacity},
+                  'evenodd',
+                  '#006600' {stroke color},
+                  1.0       {stroke opacity},
+                  0.8       {stroke width} ]));
+            end;
         end;
       end;
-
-      for i := 0 to high(textList) do
-        with textList[i] do
-        begin
-          if fontSize < 7 then fontSize := 7 else if fontSize > 30 then fontSize := 30;
-          ss.WriteString(format('<g font-family="%s" font-size="%d" fill="%s">'#10,
-            [fontName, fontSize, fontColor]));
-          ss.WriteString(format('<text x="%1.0n" y="%1.0n">%s</text>'#10'</g>'#10#10,
-            [X * scale + offsetX,  Y * scale + offsetY, text]));
-        end;
-
+    end;
     ss.WriteString(svg_xml_end);
     //finally write to file ...
     with TFileStream.Create(filename, fmCreate) do
@@ -341,39 +249,11 @@ begin
     ss.Free;
     DecimalSeparator := ds;
   end;
-
 end;
-
-//------------------------------------------------------------------------------
-// Miscellaneous functions ...
-//------------------------------------------------------------------------------
-
-const
-  subjPenColor: TColor32 = $60C3C9CF;
-  subjBrushColor: TColor32 = $00DDDDF0;
-  clipPenColor: TColor32 = $30F9BEA6;
-  clipBrushColor: TColor32 = $00FFE0E0;
-  solPenColor: TColor32 = $7F003300;
-  solBrushColor: TColor32 = $8066EF7F;
-
-var
-  scale: integer = 1; //scale bitmap to 10 decimal places
-  subj: TArrayOfArrayOfFloatPoint = nil;
-  clip: TArrayOfArrayOfFloatPoint = nil;
-  subjI: TPolygons = nil;
-  clipI: TPolygons = nil;
-  solution: TArrayOfArrayOfFloatPoint = nil;
-  solutionI: TPolygons = nil;
-  subjOpacity: cardinal = $FF000000;
-  clipOpacity: cardinal = $FF000000;
-
-{$R *.dfm}
-{$R polygons.res}
-
-//------------------------------------------------------------------------------
+//---------------------------------------------------------------------------
 
 function AAFloatPoint2AAPoint(const a: TArrayOfArrayOfFloatPoint;
-  decimals: integer = 0): TPolygons;
+  decimals: integer = 0): TArrayOfArrayOfIntPoint;
 var
   i,j,decScale: integer;
 begin
@@ -391,7 +271,7 @@ begin
 end;
 //------------------------------------------------------------------------------
 
-function AAPoint2AAFloatPoint(const a: TPolygons;
+function AAPoint2AAFloatPoint(const a: TArrayOfArrayOfIntPoint;
   decimals: integer = 0): TArrayOfArrayOfFloatPoint;
 var
   i,j,decScale: integer;
@@ -445,8 +325,14 @@ begin
 end;
 //------------------------------------------------------------------------------
 
+procedure TMainForm.FormDestroy(Sender: TObject);
+begin
+end;
+//------------------------------------------------------------------------------
+
 procedure TMainForm.bExitClick(Sender: TObject);
 begin
+  Timer1.Enabled := false;
   close;
 end;
 //------------------------------------------------------------------------------
@@ -461,7 +347,7 @@ procedure TMainForm.RepaintBitmapI;
 var
   pfm: TPolyFillMode;
   sol: TArrayOfArrayOfFloatPoint;
-  solI: TPolygons;
+  solI: TArrayOfArrayOfIntPoint;
   scaling: single;
 begin
   ImgView321.Bitmap.Clear(clWhite32);
@@ -481,7 +367,7 @@ begin
       sol := AAPoint2AAFloatPoint(solutionI, scale);
       PolyPolylineFS(ImgView321.Bitmap, sol, clGray32, true);
       scaling := power(10, scale);
-      solI := OffsetPolygons(solutionI, offsetMul2/2 *scaling, jtRound);
+      solI := OffsetPolygons(solutionI, offsetMul2/2 *scaling);
       sol := AAPoint2AAFloatPoint(solI, scale);
     end;
     PolyPolygonFS(ImgView321.Bitmap, sol, solBrushColor);
@@ -534,8 +420,10 @@ end;
 procedure TMainForm.rbStaticClick(Sender: TObject);
 begin
   if rbStatic.Checked then
-    ShowStaticPolys
-  else if rbRandom1.Checked then
+  begin
+    Timer1.Enabled := false;
+    ShowStaticPolys;
+  end else if rbRandom1.Checked then
     ShowRandomPolys1(true)
   else
     ShowRandomPolys2(true);
@@ -546,6 +434,10 @@ begin
   tbSubj.Enabled := rbRandom1.Checked;
   tbClip.Enabled := not rbStatic.Checked;
   lblClipCount.Enabled := not rbStatic.Checked;
+
+  bNext.Enabled := not rbStatic.Checked and not Timer1.Enabled;
+  bStart.Enabled := bNext.Enabled;
+  bStop.Enabled := Timer1.Enabled;
 end;
 //------------------------------------------------------------------------------
 
@@ -560,6 +452,31 @@ end;
 procedure TMainForm.bNextClick(Sender: TObject);
 begin
   if not bNext.Enabled then exit;
+  if rbRandom1.Checked then ShowRandomPolys1(true)
+  else ShowRandomPolys2(true);
+end;
+//------------------------------------------------------------------------------
+
+procedure TMainForm.bStartClick(Sender: TObject);
+begin
+  Timer1.Enabled := true;
+  bStart.Enabled := false;
+  bStop.Enabled := true;
+  bNext.Enabled := false;
+end;
+//------------------------------------------------------------------------------
+
+procedure TMainForm.bStopClick(Sender: TObject);
+begin
+  Timer1.Enabled := false;
+  bStart.Enabled := true;
+  bStop.Enabled := false;
+  bNext.Enabled := true;
+end;
+//------------------------------------------------------------------------------
+
+procedure TMainForm.Timer1Timer(Sender: TObject);
+begin
   if rbRandom1.Checked then ShowRandomPolys1(true)
   else ShowRandomPolys2(true);
 end;
@@ -741,7 +658,7 @@ begin
 end;
 //------------------------------------------------------------------------------
 
-function MakeArrayOfIntPoint(const pts: array of integer): TPolygon;
+function MakeArrayOfIntPoint(const pts: array of integer): TArrayOfIntPoint;
 var
   i, len: integer;
 begin
@@ -763,26 +680,8 @@ var
 begin
   if not SaveDialog1.Execute then exit;
   invScale := 1/ power(10, scale);
-  with TSvgBuilder.Create do
-  try
-    style.penWidth := 0.8;
-
-    style.brushClr := $0F0000FF;
-    style.penClr := $800099FF;
-    AddPolygons(subjI);
-
-    style.brushClr := $0FFFFF00;
-    style.penClr := $80FF9900;
-    AddPolygons(clipI);
-
-    style.brushClr := $2000FF00;
-    style.penClr := $FF006600;
-    AddPolygons(solutionI);
-
-    SaveToFile(SaveDialog1.FileName, invScale);
-  finally
-    free;
-  end;
+  PolygonsToSVG(SaveDialog1.FileName, subjI, clipI, solutionI,
+    GetFillTypeI, GetFillTypeI, invScale);
 end;
 //------------------------------------------------------------------------------
 

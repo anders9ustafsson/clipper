@@ -1,9 +1,9 @@
 //---------------------------------------------------------------------------
 
 #include <windows.h>
-#include <cstring>
+#include <cstring.h>
 #include <cmath>
-#include <sstream>
+#include <sstream.h>
 #pragma hdrstop
 
 #include "clipper.hpp"
@@ -18,7 +18,8 @@ int offsetVal = 0;
 
 LRESULT CALLBACK WndProcedure(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
-int CALLBACK WinMain(HINSTANCE hInstance,
+#pragma argsused
+WINAPI _tWinMain(HINSTANCE hInstance,
   HINSTANCE hPrevInstance, LPTSTR lpCmdLine, int nCmdShow)
 {
   MSG        Msg;
@@ -76,9 +77,9 @@ void OnPaint(HWND hWnd, HDC dc)
   cairo_set_source_rgba(cr, 1, 1, 1, 1);
   cairo_fill(cr);
 
-  using namespace ClipperLib;
+  using namespace clipper;
 
-  const int scaling = 2;
+  const scaling = 2;
 
   Clipper clpr;    //clipper class
   Polygons pg; //std::vector for polygon(s) storage
@@ -112,7 +113,7 @@ void OnPaint(HWND hWnd, HDC dc)
 
   clpr.Execute(ctIntersection, pg, pftNonZero, pftNonZero);
   //now do something fancy with the returned polygons ...
-  OffsetPolygons(pg, pg, offsetVal * std::pow((double)10,scaling), jtMiter);
+  pg = OffsetPolygons(pg, offsetVal * std::pow((double)10,scaling));
 
   //finally copy the clipped path back to the cairo context and draw it ...
   cairo::clipper_to_cairo(pg, cr, scaling);
@@ -123,9 +124,9 @@ void OnPaint(HWND hWnd, HDC dc)
 
   cairo_text_extents_t extent;
   cairo_set_font_size(cr,11);
-  std::stringstream ss;
+  stringstream ss;
   ss << "Polygon offset = " << offsetVal << ".  (Adjust with arrow keys)";
-  std::string s = ss.str();
+  string s = ss.str();
   cairo_text_extents(cr, s.c_str(), &extent);
   cairo_move_to(cr, 10, rec.bottom - extent.height);
   cairo_show_text(cr, s.c_str());

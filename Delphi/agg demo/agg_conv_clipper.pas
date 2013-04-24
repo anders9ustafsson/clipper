@@ -1,8 +1,8 @@
 (*******************************************************************************
 *                                                                              *
 * Author    :  Angus Johnson                                                   *
-* Version   :  1.2                                                             *
-* Date      :  29 September 2011                                               *
+* Version   :  1.1                                                             *
+* Date      :  4 April 2011                                                    *
 * Website   :  http://www.angusj.com                                           *
 * Copyright :  Angus Johnson 2010-2011                                         *
 *                                                                              *
@@ -22,10 +22,10 @@ interface
 uses
   types,
   math,
+  clipper ,
   agg_basics ,
   agg_array ,
-  agg_vertex_source ,
-  clipper;
+  agg_vertex_source ;
 
 type
   clipper_op_e = (
@@ -38,9 +38,7 @@ type
 
   clipper_polyFillType = (
     clipper_evenOdd,
-    clipper_nonZero,
-    clipper_positive,
-    clipper_negative
+    clipper_nonZero
   );
 
   status = (status_move_to, status_line_to, status_stop );
@@ -62,7 +60,7 @@ type
 
    m_poly_a ,
    m_poly_b ,
-   m_result : TPolygons;
+   m_result : TArrayOfArrayOfIntPoint;
 
    m_vertex_accumulator: pod_deque;
    clipper: TClipper;
@@ -91,20 +89,17 @@ type
    procedure start_extracting;
    procedure start_contour;
    procedure add_vertex_ (x,y: double );
-   procedure end_contour(var p: TPolygons);
-   procedure add(src : vertex_source_ptr; var p: TPolygons);
+   procedure end_contour(var p: TArrayOfArrayOfIntPoint);
+   procedure add(src : vertex_source_ptr; var p: TArrayOfArrayOfIntPoint);
   end;
 
 implementation
 
 function pft(cpft: clipper_polyFillType): TPolyFillType;
 begin
-  case cpft of
-    clipper_evenOdd: result := pftEvenOdd;
-    clipper_nonZero: result := pftNonZero;
-    clipper_positive: result := pftPositive;
-    else {clipper_negative: } result := pftNegative;
-  end;
+  if cpft = clipper_evenOdd then
+    result := pftEvenOdd else
+    result := pftNonZero;
 end;
 
 constructor conv_clipper.Construct(a, b: vertex_source_ptr;
@@ -227,7 +222,7 @@ begin
 end;
 //------------------------------------------------------------------------------
 
-procedure conv_clipper.end_contour(var p: TPolygons);
+procedure conv_clipper.end_contour(var p: TArrayOfArrayOfIntPoint);
 var
   i, len: integer;
 begin
@@ -302,7 +297,7 @@ begin
 end;
 //------------------------------------------------------------------------------
 
-procedure conv_clipper.add(src : vertex_source_ptr; var p: TPolygons);
+procedure conv_clipper.add(src : vertex_source_ptr; var p: TArrayOfArrayOfIntPoint);
 var
   cmd: unsigned;
   x, y, start_x ,start_y: double;

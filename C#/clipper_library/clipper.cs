@@ -1,10 +1,10 @@
 ﻿/*******************************************************************************
 *                                                                              *
 * Author    :  Angus Johnson                                                   *
-* Version   :  5.1.4                                                           *
-* Date      :  24 March 2013                                                   *
+* Version   :  4.3.3                                                           *
+* Date      :  5 August 2011                                                   *
 * Website   :  http://www.angusj.com                                           *
-* Copyright :  Angus Johnson 2010-2013                                         *
+* Copyright :  Angus Johnson 2010-2011                                         *
 *                                                                              *
 * License:                                                                     *
 * Use, modification & distribution is subject to Boost Software License Ver 1. *
@@ -21,14 +21,6 @@
 * Springer; 1 edition (January 4, 2005)                                        *
 * http://books.google.com/books?q=vatti+clipping+agoston                       *
 *                                                                              *
-* See also:                                                                    *
-* "Polygon Offsetting by Computing Winding Numbers"                            *
-* Paper no. DETC2005-85513 pp. 565-575                                         *
-* ASME 2005 International Design Engineering Technical Conferences             *
-* and Computers and Information in Engineering Conference (IDETC/CIE2005)      *
-* September 24-28, 2005 , Long Beach, California, USA                          *
-* http://www.me.berkeley.edu/~mcmains/pubs/DAC05OffsetPolygon.pdf              *
-*                                                                              *
 *******************************************************************************/
 
 /*******************************************************************************
@@ -42,158 +34,59 @@ using System;
 using System.Collections.Generic;
 //using System.Text; //for Int128.AsString() & StringBuilder
 
-namespace ClipperLib
+namespace clipper
 {
-   
+
     using Polygon = List<IntPoint>;
     using Polygons = List<List<IntPoint>>;
-
+    using ExPolygons = List<ExPolygon>;
+        
     //------------------------------------------------------------------------------
-    // PolyTree & PolyNode classes
-    //------------------------------------------------------------------------------
-
-    public class PolyTree : PolyNode
-    {
-        internal List<PolyNode> m_AllPolys = new List<PolyNode>();
-
-        ~PolyTree()
-        {
-            Clear();
-        }
-        
-        public void Clear() 
-        {
-            for (int i = 0; i < m_AllPolys.Count; i++)
-                m_AllPolys[i] = null;
-            m_AllPolys.Clear(); 
-            m_Childs.Clear(); 
-        }
-        
-        public PolyNode GetFirst()
-        {
-            if (m_Childs.Count > 0)
-                return m_Childs[0];
-            else
-                return null;
-        }
-
-        public int Total
-        {
-            get { return m_AllPolys.Count; }
-        }
-
-    }
-        
-    public class PolyNode 
-    {
-        internal PolyNode m_Parent;
-        internal Polygon m_polygon = new Polygon();
-        internal int m_Index;
-        internal List<PolyNode> m_Childs = new List<PolyNode>();
-
-        private bool IsHoleNode()
-        {
-            bool result = true;
-            PolyNode node = m_Parent;
-            while (node != null)
-            {
-                result = !result;
-                node = node.m_Parent;
-            }
-            return result;
-        }
-
-        public int ChildCount
-        {
-            get { return m_Childs.Count; }
-        }
-
-        public Polygon Contour
-        {
-            get { return m_polygon; }
-        }
-
-        internal void AddChild(PolyNode Child)
-        {
-            int cnt = m_Childs.Count;
-            m_Childs.Add(Child);
-            Child.m_Parent = this;
-            Child.m_Index = cnt;
-        }
-
-        public PolyNode GetNext()
-        {
-            if (m_Childs.Count > 0) 
-                return m_Childs[0]; 
-            else
-                return GetNextSiblingUp();        
-        }
-  
-        internal PolyNode GetNextSiblingUp()
-        {
-            if (m_Parent == null)
-                return null;
-            else if (m_Index == m_Parent.m_Childs.Count - 1)
-                return m_Parent.GetNextSiblingUp();
-            else
-                return m_Parent.m_Childs[m_Index + 1];
-        }
-
-        public List<PolyNode> Childs
-        {
-            get { return m_Childs; }
-        }
-
-        public PolyNode Parent
-        {
-            get { return m_Parent; }
-        }
-
-        public bool IsHole
-        {
-            get { return IsHoleNode(); }
-        }
-    }
-        
-
-    //------------------------------------------------------------------------------
-    // Int128 struct (enables safe math on signed 64bit integers)
+    // Int128 class (enables safe math on signed 64bit integers)
     // eg Int128 val1((Int64)9223372036854775807); //ie 2^63 -1
     //    Int128 val2((Int64)9223372036854775807);
     //    Int128 val3 = val1 * val2;
     //    val3.ToString => "85070591730234615847396907784232501249" (8.5e+37)
     //------------------------------------------------------------------------------
 
-    internal struct Int128
+    internal class Int128
     {
         private Int64 hi;
-        private UInt64 lo;
-
-        public Int128(Int64 _lo)
+        private Int64 lo;
+    
+        public Int128(Int64 _lo = 0)
         {
-            lo = (UInt64)_lo;
-            if (_lo < 0) hi = -1; 
-            else hi = 0;
+            hi = 0;
+            lo = Math.Abs(_lo);
+            if (_lo < 0) Negate(this);
         }
 
-        public Int128(Int64 _hi, UInt64 _lo)
-        {
-            lo = _lo;
-            hi = _hi;
-        }
- 
         public Int128(Int128 val)
         {
-            hi = val.hi;
-            lo = val.lo;
+            Assign(val);
         }
 
-        public bool IsNegative()
+        public void Assign(Int128 val)
         {
-            return hi < 0;
+            hi = val.hi; lo = val.lo;
         }
 
-        public static bool operator ==(Int128 val1, Int128 val2)
+        static private void Negate(Int128 val)
+        {
+            if (val.lo == 0)
+            {
+            if( val.hi == 0) return;
+            val.lo = ~val.lo;
+            val.hi = ~val.hi +1;
+            }
+            else
+            {
+            val.lo = ~val.lo +1;
+            val.hi = ~val.hi;
+            }
+        }
+
+        public static bool operator== (Int128 val1, Int128 val2)
         {
             if ((object)val1 == (object)val2) return true;
             else if ((object)val1 == null || (object)val2 == null) return false;
@@ -207,9 +100,9 @@ namespace ClipperLib
 
         public override bool Equals(System.Object obj)
         {
-            if (obj == null || !(obj is Int128))
-	            return false;
-            Int128 i128 = (Int128)obj;
+            if (obj == null) return false;
+            Int128 i128 = obj as Int128;
+            if (i128 == null) return false;
             return (i128.hi == hi && i128.lo == lo);
         }
 
@@ -220,44 +113,49 @@ namespace ClipperLib
 
         public static bool operator> (Int128 val1, Int128 val2) 
         {
-            if (val1.hi != val2.hi)
-                return val1.hi > val2.hi;
-            else
-                return val1.lo > val2.lo;
+            if (System.Object.ReferenceEquals(val1, val2)) return false;
+            else if (val2 == null) return true;
+            else if (val1 == null) return false;
+            else if (val1.hi > val2.hi) return true;
+            else if (val1.hi < val2.hi) return false;
+            else return (UInt64)val1.lo > (UInt64)val2.lo;
         }
 
         public static bool operator< (Int128 val1, Int128 val2) 
         {
-            if (val1.hi != val2.hi)
-                return val1.hi < val2.hi;
-            else
-                return val1.lo < val2.lo;
+            if (System.Object.ReferenceEquals(val1, val2)) return false;
+            else if (val2 == null) return false;
+            else if (val1 == null) return true;
+            if (val1.hi < val2.hi) return true;
+            else if (val1.hi > val2.hi) return false;
+            else return (UInt64)val1.lo < (UInt64)val2.lo;
         }
 
         public static Int128 operator+ (Int128 lhs, Int128 rhs) 
         {
-            lhs.hi += rhs.hi;
-            lhs.lo += rhs.lo;
-            if (lhs.lo < rhs.lo) lhs.hi++;
+            Int64 xlo = lhs.lo;
+            lhs.hi += rhs.hi; lhs.lo += rhs.lo;
+            if((xlo < 0 && rhs.lo < 0) || (((xlo < 0) != (rhs.lo < 0)) && lhs.lo >= 0)) lhs.hi++;
             return lhs;
         }
 
         public static Int128 operator- (Int128 lhs, Int128 rhs) 
         {
-            return lhs + -rhs;
+            Int128 tmp = new Int128(rhs);
+            Negate(tmp);
+            lhs += tmp;
+            return lhs;
         }
 
-		public static Int128 operator -(Int128 val)
-		{
-            if (val.lo == 0) 
-                return new Int128(-val.hi, 0);
-            else 
-                return new Int128(~val.hi, ~val.lo +1);
-		}
-
-        //nb: Constructing two new Int128 objects every time we want to multiply longs  
+        //nb: Constructing two new Int128 objects every time we want to multiply Int64s  
         //is slow. So, although calling the Int128Mul method doesn't look as clean, the 
         //code runs significantly faster than if we'd used the * operator.
+        //public static Int128 operator *(Int128 lhs, Int128 rhs)
+        //{
+        //    if (!(lhs.hi == 0 || lhs.hi == -1) || !(rhs.hi == 0 || rhs.hi == -1))
+        //        throw new Exception("Int128 operator*: overflow error");
+        //    return Int128Mul(lhs.lo, rhs.lo);
+        //}
         
         public static Int128 Int128Mul(Int64 lhs, Int64 rhs)
         {
@@ -272,75 +170,47 @@ namespace ClipperLib
             //nb: see comments in clipper.pas
             UInt64 a = int1Hi * int2Hi;
             UInt64 b = int1Lo * int2Lo;
-            UInt64 c = int1Hi * int2Lo + int1Lo * int2Hi;
+            UInt64 c = int1Hi * int2Lo + int1Lo * int2Hi; //nb avoid karatsuba
 
-            UInt64 lo; 
-            Int64 hi;
-            hi = (Int64)(a + (c >> 32));
-
-            unchecked { lo = (c << 32) + b; }
-            if (lo < b) hi++;
-            Int128 result = new Int128(hi, lo);
-            return negate ? -result : result;            
+            Int128 result = new Int128();
+            result.lo = (Int64)(c << 32);
+            result.hi = (Int64)(a + (c >> 32));
+            bool hiBitSet = (result.lo < 0);
+            result.lo += (Int64)b;
+            if ((hiBitSet && ((Int64)b < 0)) ||
+            ((hiBitSet != ((Int64)b < 0)) && (result.lo >= 0))) result.hi++;
+            if (negate) Negate(result);
+            return result;
         }
 
         public static Int128 operator /(Int128 lhs, Int128 rhs)
         {
             if (rhs.lo == 0 && rhs.hi == 0)
-                throw new ClipperException("Int128: divide by zero");
-
+                throw new Exception("Int128 operator/: divide by zero");
             bool negate = (rhs.hi < 0) != (lhs.hi < 0);
-            if (lhs.hi < 0) lhs = -lhs;
-            if (rhs.hi < 0) rhs = -rhs;
+            Int128 result = new Int128(lhs), denom = new Int128(rhs);
+            if (result.hi < 0) Negate(result);
+            if (denom.hi < 0) Negate(denom);
+            if (denom > result) return new Int128(0); //result is only a fraction of 1
+            Negate(denom);
 
-            if (rhs < lhs)
+            Int128 p = new Int128(0), p2 = new Int128(0);
+            for (int i = 0; i < 128; ++i)
             {
-                Int128 result = new Int128(0);
-                Int128 cntr = new Int128(1);
-                while (rhs.hi >= 0 && !(rhs > lhs))
-                {
-                    rhs.hi <<= 1;
-                    if ((Int64)rhs.lo < 0) rhs.hi++;
-                    rhs.lo <<= 1;
-
-                    cntr.hi <<= 1;
-                    if ((Int64)cntr.lo < 0) cntr.hi++;
-                    cntr.lo <<= 1;
-                }
-                rhs.lo >>= 1;
-                if ((rhs.hi & 1) == 1)
-                    rhs.lo |= 0x8000000000000000;
-                rhs.hi = (Int64)((UInt64)rhs.hi >> 1);
-
-                cntr.lo >>= 1;
-                if ((cntr.hi & 1) == 1)
-                    cntr.lo |= 0x8000000000000000;
-                cntr.hi >>= 1;
-
-                while (cntr.hi != 0 || cntr.lo != 0)
-                {
-                    if (!(lhs < rhs))
-                    {
-                        lhs -= rhs;
-                        result.hi |= cntr.hi;
-                        result.lo |= cntr.lo;
-                    }
-                    rhs.lo >>= 1;
-                    if ((rhs.hi & 1) == 1)
-                        rhs.lo |= 0x8000000000000000; 
-                    rhs.hi >>= 1;
-
-                    cntr.lo >>= 1;
-                    if ((cntr.hi & 1) == 1)
-                        cntr.lo |= 0x8000000000000000;
-                    cntr.hi >>= 1;
-                }
-                return negate ? -result : result;
+                p.hi = p.hi << 1;
+                if (p.lo < 0) p.hi++;
+                p.lo = (Int64)p.lo << 1;
+                if (result.hi < 0) p.lo++;
+                result.hi = result.hi << 1;
+                if (result.lo < 0) result.hi++;
+                result.lo = (Int64)result.lo << 1;
+                p2.Assign(p);
+                p += denom;
+                if (p.hi < 0) p.Assign(p2);
+                else result.lo++;
             }
-            else if (rhs == lhs)
-                return new Int128(1);
-            else
-                return new Int128(0);
+            if (negate) Negate(result);
+            return result;
         }
 
         public double ToDouble()
@@ -348,66 +218,109 @@ namespace ClipperLib
             const double shift64 = 18446744073709551616.0; //2^64
             if (hi < 0)
             {
-                if (lo == 0)
-                    return (double)hi * shift64;
-                else
-                    return -(double)(~lo + ~hi * shift64);
+                Int128 tmp = new Int128(this);
+                Negate(tmp);
+                return -((double)tmp.lo + (double)tmp.hi * shift64);
             }
-            else
-                return (double)(lo + hi * shift64);
+            else return (double)lo + (double)hi * shift64;
         }
 
+        ////for bug testing ...
+        //public override string ToString()
+        //{
+        //    int r = 0;
+        //    Int128 tmp = new Int128(0), val = new Int128(this);
+        //    if (hi < 0) Negate(val);
+        //    StringBuilder builder = new StringBuilder(50);
+        //    while (val.hi != 0 || val.lo != 0)
+        //    {
+        //        Div10(val, ref tmp, ref r);
+        //        builder.Insert(0, (char)('0' + r));
+        //        val.Assign(tmp);
+        //    }
+        //    if (hi < 0) return '-' + builder.ToString();
+        //    if (builder.Length == 0) return "0";
+        //    return builder.ToString();
+        //}
+
+        ////debugging only ...
+        //private void Div10(Int128 val, ref Int128 result, ref int remainder)
+        //{
+        //    remainder = 0;
+        //    result = new Int128(0);
+        //    for (int i = 63; i >= 0; --i)
+        //    {
+        //        if ((val.hi & ((Int64)1 << i)) != 0)
+        //            remainder = (remainder * 2) + 1;
+        //        else
+        //            remainder *= 2;
+        //        if (remainder >= 10)
+        //        {
+        //            result.hi += ((Int64)1 << i);
+        //            remainder -= 10;
+        //        }
+        //    }
+        //    for (int i = 63; i >= 0; --i)
+        //    {
+        //        if ((val.lo & ((Int64)1 << i)) != 0)
+        //            remainder = (remainder * 2) + 1;
+        //        else
+        //            remainder *= 2;
+        //        if (remainder >= 10)
+        //        {
+        //            result.lo += ((Int64)1 << i);
+        //            remainder -= 10;
+        //        }
+        //    }
+        //}
     };
 
     //------------------------------------------------------------------------------
     //------------------------------------------------------------------------------
    
-    public struct IntPoint
+    public class IntPoint
     {
-        public Int64 X;
-        public Int64 Y;
-        
-        public IntPoint(Int64 X, Int64 Y)
+        public Int64 X { get; set; }
+        public Int64 Y { get; set; }
+        public IntPoint(Int64 X = 0, Int64 Y = 0)
         {
             this.X = X; this.Y = Y;
         }
-        
         public IntPoint(IntPoint pt)
         {
             this.X = pt.X; this.Y = pt.Y;
         }
     }
 
-    public struct IntRect
+    public class IntRect
     {
-        public Int64 left;
-        public Int64 top;
-        public Int64 right;
-        public Int64 bottom;
-
-        public IntRect(Int64 l, Int64 t, Int64 r, Int64 b)
+        public Int64 left { get; set; }
+        public Int64 top { get; set; }
+        public Int64 right { get; set; }
+        public Int64 bottom { get; set; }
+        public IntRect(Int64 l = 0, Int64 t = 0, Int64 r = 0, Int64 b = 0)
         {
             this.left = l; this.top = t;
             this.right = r; this.bottom = b;
         }
     }
 
+    public class ExPolygon
+    {
+        public Polygon outer;
+        public Polygons holes;
+    }
+
     public enum ClipType { ctIntersection, ctUnion, ctDifference, ctXor };
     public enum PolyType { ptSubject, ptClip };
-    //By far the most widely used winding rules for polygon filling are
-    //EvenOdd & NonZero (GDI, GDI+, XLib, OpenGL, Cairo, AGG, Quartz, SVG, Gr32)
-    //Others rules include Positive, Negative and ABS_GTR_EQ_TWO (only in OpenGL)
-    //see http://glprogramming.com/red/chapter11.html
-    public enum PolyFillType { pftEvenOdd, pftNonZero, pftPositive, pftNegative };
-    public enum JoinType { jtSquare, jtRound, jtMiter };
+    public enum PolyFillType { pftEvenOdd, pftNonZero };
 
 
-    [Flags]
-    internal enum EdgeSide { esLeft = 1, esRight = 2 };
+    internal enum EdgeSide { esLeft, esRight };
+    internal enum Direction { dRightToLeft, dLeftToRight };
     [Flags]
     internal enum Protects { ipNone = 0, ipLeft = 1, ipRight = 2, ipBoth = 3 };
-    internal enum Direction { dRightToLeft, dLeftToRight };
-    
+
     internal class TEdge {
         public Int64 xbot;
         public Int64 ybot;
@@ -416,8 +329,7 @@ namespace ClipperLib
         public Int64 xtop;
         public Int64 ytop;
         public double dx;
-        public Int64 deltaX;
-        public Int64 deltaY;
+        public Int64 tmpX;
         public PolyType polyType;
         public EdgeSide side;
         public int windDelta; //1 or -1 depending on winding direction
@@ -455,14 +367,15 @@ namespace ClipperLib
         public Scanbeam next;
     };
 
+
     internal class OutRec
     {
         public int idx;
         public bool isHole;
-        public OutRec FirstLeft; //see comments in clipper.pas
+        public OutRec FirstLeft;
+        public OutRec AppendLink;
         public OutPt pts;
         public OutPt bottomPt;
-        public PolyNode polyNode;
     };
 
     internal class OutPt
@@ -492,9 +405,6 @@ namespace ClipperLib
     public class ClipperBase
     {
         protected const double horizontal = -3.4E+38;
-        internal const Int64 loRange = 0x3FFFFFFF;          
-        internal const Int64 hiRange = 0x3FFFFFFFFFFFFFFFL; 
-
         internal LocalMinima m_MinimaList;
         internal LocalMinima m_CurrentLM;
         internal List<List<TEdge>> m_edges = new List<List<TEdge>>();
@@ -502,7 +412,7 @@ namespace ClipperLib
 
         //------------------------------------------------------------------------------
 
-        protected static bool PointsEqual(IntPoint pt1, IntPoint pt2)
+        protected bool PointsEqual(IntPoint pt1, IntPoint pt2)
         {
           return ( pt1.X == pt2.X && pt1.Y == pt2.Y );
         }
@@ -521,11 +431,11 @@ namespace ClipperLib
         }
         //------------------------------------------------------------------------------
 
-        internal bool PointInPolygon(IntPoint pt, OutPt pp, bool UseFulllongRange)
+        internal bool PointInPolygon(IntPoint pt, OutPt pp, bool UseFullInt64Range)
         {
           OutPt pp2 = pp;
           bool result = false;
-          if (UseFulllongRange)
+          if (UseFullInt64Range)
           {
               do
               {
@@ -555,20 +465,24 @@ namespace ClipperLib
         }
         //------------------------------------------------------------------------------
 
-        internal static bool SlopesEqual(TEdge e1, TEdge e2, bool UseFullRange)
+        internal bool SlopesEqual(TEdge e1, TEdge e2, bool UseFullInt64Range)
         {
-            if (UseFullRange)
-              return Int128.Int128Mul(e1.deltaY, e2.deltaX) ==
-                  Int128.Int128Mul(e1.deltaX, e2.deltaY);
-            else return (Int64)(e1.deltaY) * (e2.deltaX) ==
-              (Int64)(e1.deltaX) * (e2.deltaY);
+            if (e1.ybot == e1.ytop) return (e2.ybot == e2.ytop);
+            else if (e1.xbot == e1.xtop) return (e2.xbot == e2.xtop);
+            else if (UseFullInt64Range)
+              return Int128.Int128Mul(e1.ytop - e1.ybot, e2.xtop - e2.xbot) ==
+                  Int128.Int128Mul(e1.xtop - e1.xbot, e2.ytop - e2.ybot);
+            else return (Int64)(e1.ytop - e1.ybot) * (e2.xtop - e2.xbot) -
+              (Int64)(e1.xtop - e1.xbot)*(e2.ytop - e2.ybot) == 0;
         }
         //------------------------------------------------------------------------------
 
-        protected static bool SlopesEqual(IntPoint pt1, IntPoint pt2,
-            IntPoint pt3, bool UseFullRange)
+        protected bool SlopesEqual(IntPoint pt1, IntPoint pt2,
+            IntPoint pt3, bool UseFullInt64Range)
         {
-            if (UseFullRange)
+            if (pt1.Y == pt2.Y) return (pt2.Y == pt3.Y);
+            else if (pt1.X == pt2.X) return (pt2.X == pt3.X);
+            else if (UseFullInt64Range)
                 return Int128.Int128Mul(pt1.Y - pt2.Y, pt2.X - pt3.X) ==
                   Int128.Int128Mul(pt1.X - pt2.X, pt2.Y - pt3.Y);
             else return
@@ -576,10 +490,12 @@ namespace ClipperLib
         }
         //------------------------------------------------------------------------------
 
-        protected static bool SlopesEqual(IntPoint pt1, IntPoint pt2,
-            IntPoint pt3, IntPoint pt4, bool UseFullRange)
+        protected bool SlopesEqual(IntPoint pt1, IntPoint pt2,
+            IntPoint pt3, IntPoint pt4, bool UseFullInt64Range)
         {
-            if (UseFullRange)
+            if (pt1.Y == pt2.Y) return (pt3.Y == pt4.Y);
+            else if (pt1.X == pt2.X) return (pt3.X == pt4.X);
+            else if (UseFullInt64Range)
                 return Int128.Int128Mul(pt1.Y - pt2.Y, pt3.X - pt4.X) ==
                   Int128.Int128Mul(pt1.X - pt2.X, pt3.Y - pt4.Y);
             else return
@@ -591,15 +507,27 @@ namespace ClipperLib
         {
             m_MinimaList = null;
             m_CurrentLM = null;
-            m_UseFullRange = false;
+            m_UseFullRange = true; //ie default for UseFullCoordinateRange == true
         }
         //------------------------------------------------------------------------------
 
-        //destructor - commented out since I gather this impedes the GC 
-        //~ClipperBase() 
-        //{
-        //    Clear();
-        //}
+        ~ClipperBase() //destructor
+        {
+            Clear();
+        }
+        //------------------------------------------------------------------------------
+
+        public bool UseFullCoordinateRange
+        {
+            get { return m_UseFullRange; }
+            set 
+            {
+                if (m_edges.Count > 0 && value == true)
+                    throw new Exception("UseFullCoordinateRange() can't be changed "+      
+                        "until the Clipper object has been cleared.");
+                m_UseFullRange = value; 
+            }
+        }
         //------------------------------------------------------------------------------
 
         public virtual void Clear()
@@ -611,7 +539,6 @@ namespace ClipperLib
                 m_edges[i].Clear();
             }
             m_edges.Clear();
-            m_UseFullRange = false;
         }
         //------------------------------------------------------------------------------
 
@@ -645,17 +572,11 @@ namespace ClipperLib
             int j = 0;
             for (int i = 1; i < len; ++i)
             {
-
-                Int64 maxVal;
-                if (m_UseFullRange) maxVal = hiRange; else maxVal = loRange;
-                if (Math.Abs(pg[i].X) > maxVal || Math.Abs(pg[i].Y) > maxVal)
-                {
-                    if (Math.Abs(pg[i].X) > hiRange || Math.Abs(pg[i].Y) > hiRange)
-                    throw new ClipperException("Coordinate exceeds range bounds");
-                  maxVal = hiRange;
-                  m_UseFullRange = true;
-                }
-
+                const Int64 MaxVal = 1500000000; //~ Sqrt(2^63)/2 => 1.5e+9 (see SlopesEqual)
+                if (!m_UseFullRange && 
+                    (Math.Abs(pg[i].X) > MaxVal || Math.Abs(pg[i].Y) > MaxVal))
+                        throw new ClipperException("Integer exceeds range bounds");
+                
                 if (PointsEqual(p[j], pg[i])) continue;
                 else if (j > 0 && SlopesEqual(p[j-1], p[j], pg[i], m_UseFullRange))
                 {
@@ -668,20 +589,21 @@ namespace ClipperLib
             if (j < 2) return false;
 
             len = j+1;
-            while (len > 2)
+            for (;;)
             {
-                //nb: test for point equality before testing slopes ...
-                if (PointsEqual(p[j], p[0])) j--;
-                else if (PointsEqual(p[0], p[1]) || SlopesEqual(p[j], p[0], p[1], m_UseFullRange))
-                    p[0] = p[j--];
-                else if (SlopesEqual(p[j - 1], p[j], p[0], m_UseFullRange)) j--;
-                else if (SlopesEqual(p[0], p[1], p[2], m_UseFullRange))
-                {
-                    for (int i = 2; i <= j; ++i) p[i - 1] = p[i];
-                    j--;
-                }
-                else break;
-                len--;
+            //nb: test for point equality before testing slopes ...
+            if (PointsEqual(p[j], p[0])) j--;
+            else if (PointsEqual(p[0], p[1]) || SlopesEqual(p[j], p[0], p[1], m_UseFullRange))
+                p[0] = p[j--];
+            else if (SlopesEqual(p[j-1], p[j], p[0], m_UseFullRange)) j--;
+            else if (SlopesEqual(p[0], p[1], p[2], m_UseFullRange))
+            {
+                for (int i = 2; i <= j; ++i) p[i-1] = p[i];
+                j--;
+            }
+            //exit loop if nothing is changed or there are too few vertices ...
+            if (j == len-1 || j < 2) break;
+            len = j +1;
             }
             if (len < 3) return false;
 
@@ -755,10 +677,8 @@ namespace ClipperLib
 
         private void SetDx(TEdge e)
         {
-          e.deltaX = (e.xtop - e.xbot);
-          e.deltaY = (e.ytop - e.ybot);
-          if (e.deltaY == 0) e.dx = horizontal;
-          else e.dx = (double)(e.deltaX) / (e.deltaY);
+          if (e.ybot == e.ytop) e.dx = horizontal;
+          else e.dx = (double)(e.xtop - e.xbot)/(e.ytop - e.ybot);
         }
         //---------------------------------------------------------------------------
 
@@ -931,6 +851,7 @@ namespace ClipperLib
 
     public class Clipper : ClipperBase
     {
+    
         private List<OutRec> m_PolyOuts;
         private ClipType m_ClipType;
         private Scanbeam m_Scanbeam;
@@ -942,8 +863,6 @@ namespace ClipperLib
         private PolyFillType m_SubjFillType;
         private List<JoinRec> m_Joins;
         private List<HorzJoinRec> m_HorizJoins;
-        private bool m_ReverseOutput;
-        private bool m_UsingPolyTree;
 
         public Clipper()
         {
@@ -952,20 +871,17 @@ namespace ClipperLib
             m_SortedEdges = null;
             m_IntersectNodes = null;
             m_ExecuteLocked = false;
-            m_UsingPolyTree = false;
             m_PolyOuts = new List<OutRec>();
             m_Joins = new List<JoinRec>();
             m_HorizJoins = new List<HorzJoinRec>();
-            m_ReverseOutput = false;
         }
         //------------------------------------------------------------------------------
 
-        //destructor - commented out since I gather this impedes the GC 
-        //~Clipper() //destructor
-        //{
-        //    Clear();
-        //    DisposeScanbeamList();
-        //}
+        ~Clipper() //destructor
+        {
+            Clear();
+            DisposeScanbeamList();
+        }
         //------------------------------------------------------------------------------
 
         public override void Clear()
@@ -1003,13 +919,6 @@ namespace ClipperLib
         }
         //------------------------------------------------------------------------------
 
-        public bool ReverseSolution
-        {
-            get { return m_ReverseOutput; }
-            set { m_ReverseOutput = value; }
-        }
-        //------------------------------------------------------------------------------
-        
         private void InsertScanbeam(Int64 Y)
         {
           if( m_Scanbeam == null )
@@ -1046,8 +955,7 @@ namespace ClipperLib
             m_SubjFillType = subjFillType;
             m_ClipFillType = clipFillType;
             m_ClipType = clipType;
-            m_UsingPolyTree = false;
-            bool succeeded = ExecuteInternal();
+            bool succeeded = ExecuteInternal(false);
             //build the return polygons ...
             if (succeeded) BuildResult(solution);
             m_ExecuteLocked = false;
@@ -1055,53 +963,84 @@ namespace ClipperLib
         }
         //------------------------------------------------------------------------------
 
-        public bool Execute(ClipType clipType, PolyTree polytree,
+        public bool Execute(ClipType clipType, ExPolygons solution,
             PolyFillType subjFillType, PolyFillType clipFillType)
         {
             if (m_ExecuteLocked) return false;
             m_ExecuteLocked = true;
+            solution.Clear();
             m_SubjFillType = subjFillType;
             m_ClipFillType = clipFillType;
             m_ClipType = clipType;
-            m_UsingPolyTree = true;
-            bool succeeded = ExecuteInternal();
+            bool succeeded = ExecuteInternal(true);
             //build the return polygons ...
-            if (succeeded) BuildResult2(polytree);
+            if (succeeded) BuildResultEx(solution);
             m_ExecuteLocked = false;
             return succeeded;
         }
         //------------------------------------------------------------------------------
 
-        public bool Execute(ClipType clipType, Polygons solution)
+        internal int PolySort(OutRec or1, OutRec or2)
         {
-            return Execute(clipType, solution,
-                PolyFillType.pftEvenOdd, PolyFillType.pftEvenOdd);
+          if (or1 == or2) return 0;
+          else if (or1.pts == null || or2.pts == null)
+          {
+            if ((or1.pts == null) != (or2.pts == null))
+            {
+                if (or1.pts != null) return -1; else return 1;
+            }
+            else return 0;          
+          }
+          int i1, i2;
+          if (or1.isHole)
+            i1 = or1.FirstLeft.idx; else
+            i1 = or1.idx;
+          if (or2.isHole)
+            i2 = or2.FirstLeft.idx; else
+            i2 = or2.idx;
+          int result = i1 - i2;
+          if (result == 0 && (or1.isHole != or2.isHole))
+          {
+              if (or1.isHole) return 1;
+              else return -1;
+          }
+          return result;
         }
         //------------------------------------------------------------------------------
 
-        public bool Execute(ClipType clipType, PolyTree polytree)
+        internal OutRec FindAppendLinkEnd(OutRec outRec)
         {
-            return Execute(clipType, polytree,
-                PolyFillType.pftEvenOdd, PolyFillType.pftEvenOdd);
+          while (outRec.AppendLink != null) outRec = outRec.AppendLink;
+          return outRec;
         }
         //------------------------------------------------------------------------------
 
         internal void FixHoleLinkage(OutRec outRec)
         {
-            //skip if an outermost polygon or
-            //already already points to the correct FirstLeft ...
-            if (outRec.FirstLeft == null ||                
-                  (outRec.isHole != outRec.FirstLeft.isHole &&
-                  outRec.FirstLeft.pts != null)) return;
+            OutRec tmp;
+            if (outRec.bottomPt != null) 
+                tmp = m_PolyOuts[outRec.bottomPt.idx].FirstLeft; 
+            else
+                tmp = outRec.FirstLeft;
+            if (outRec == tmp) throw new ClipperException("HoleLinkage error");
 
-            OutRec orfl = outRec.FirstLeft;
-            while (orfl != null && ((orfl.isHole == outRec.isHole) || orfl.pts == null))
-                orfl = orfl.FirstLeft;
-            outRec.FirstLeft = orfl;
+            if (tmp != null) 
+            {
+                if (tmp.AppendLink != null) tmp = FindAppendLinkEnd(tmp);
+                if (tmp == outRec) tmp = null;
+                else if (tmp.isHole)
+                {
+                    FixHoleLinkage(tmp);
+                    tmp = tmp.FirstLeft;
+                }
+            }
+            outRec.FirstLeft = tmp;
+            if (tmp == null) outRec.isHole = false;
+            outRec.AppendLink = null;
         }
         //------------------------------------------------------------------------------
 
-        private bool ExecuteInternal()
+        private bool ExecuteInternal(bool fixHoleLinkages)
         {
             bool succeeded;
             try
@@ -1115,7 +1054,7 @@ namespace ClipperLib
                     m_HorizJoins.Clear();
                     ProcessHorizontals();
                     Int64 topY = PopScanbeam();
-                    succeeded = ProcessIntersections(botY, topY);
+                    succeeded = ProcessIntersections(topY);
                     if (!succeeded) break;
                     ProcessEdgesAtTopOfScanbeam(topY);
                     botY = topY;
@@ -1126,16 +1065,18 @@ namespace ClipperLib
             if (succeeded)
             { 
                 //tidy up output polygons and fix orientations where necessary ...
-                for (int i = 0; i < m_PolyOuts.Count; i++)
+                foreach (OutRec outRec in m_PolyOuts)
                 {
-                  OutRec outRec = m_PolyOuts[i];
                   if (outRec.pts == null) continue;
                   FixupOutPolygon(outRec);
                   if (outRec.pts == null) continue;
-                  if ((outRec.isHole ^ m_ReverseOutput) == (Area(outRec, m_UseFullRange) > 0))
-                      ReversePolyPtLinks(outRec.pts);
+                  if (outRec.isHole && fixHoleLinkages) FixHoleLinkage(outRec);
+                  if (outRec.isHole == IsClockwise(outRec, m_UseFullRange))
+                    ReversePolyPtLinks(outRec.pts);
                 }
+
                 JoinCommonEdges();
+                if (fixHoleLinkages) m_PolyOuts.Sort(new Comparison<OutRec>(PolySort));
             }
             m_Joins.Clear();
             m_HorizJoins.Clear();
@@ -1154,15 +1095,15 @@ namespace ClipperLib
         //------------------------------------------------------------------------------
 
         private void DisposeAllPolyPts(){
-          for (int i = 0; i < m_PolyOuts.Count; ++i) DisposeOutRec(i);
+          for (int i = 0; i < m_PolyOuts.Count; ++i) DisposeOutRec(i, false);
           m_PolyOuts.Clear();
         }
         //------------------------------------------------------------------------------
 
-        void DisposeOutRec(int index)
+        void DisposeOutRec(int index, bool ignorePts)
         {
           OutRec outRec = m_PolyOuts[index];
-          if (outRec.pts != null) DisposeOutPts(outRec.pts);
+          if (!ignorePts && outRec.pts != null) DisposeOutPts(outRec.pts);
           outRec = null;
           m_PolyOuts[index] = null;
         }
@@ -1182,7 +1123,7 @@ namespace ClipperLib
         }
         //------------------------------------------------------------------------------
 
-        private void AddJoin(TEdge e1, TEdge e2, int e1OutIdx, int e2OutIdx)
+        private void AddJoin(TEdge e1, TEdge e2, int e1OutIdx = -1, int e2OutIdx = -1)
         {
             JoinRec jr = new JoinRec();
             if (e1OutIdx >= 0)
@@ -1219,16 +1160,14 @@ namespace ClipperLib
             InsertScanbeam( lb.ytop );
             InsertEdgeIntoAEL( rb );
 
-            if (IsEvenOddFillType(lb))
-            {
-                lb.windDelta = 1;
-                rb.windDelta = 1;
-            }
+            if ( IsNonZeroFillType( lb) )
+              rb.windDelta = -lb.windDelta;
             else
             {
-                rb.windDelta = -lb.windDelta;
+              lb.windDelta = 1;
+              rb.windDelta = 1;
             }
-            SetWindingCount(lb);
+            SetWindingCount( lb );
             rb.windCnt = lb.windCnt;
             rb.windCnt2 = lb.windCnt2;
 
@@ -1244,20 +1183,30 @@ namespace ClipperLib
             if( IsContributing(lb) )
                 AddLocalMinPoly(lb, rb, new IntPoint(lb.xcurr, m_CurrentLM.Y));
 
+
+            //if output polygons share an edge, they'll need joining later ...
+            if (lb.outIdx >= 0 && lb.prevInAEL != null &&
+              lb.prevInAEL.outIdx >= 0 && lb.prevInAEL.xcurr == lb.xbot &&
+               SlopesEqual(lb, lb.prevInAEL, m_UseFullRange))
+                AddJoin(lb, lb.prevInAEL);
+
             //if any output polygons share an edge, they'll need joining later ...
-            if (rb.outIdx >= 0 && rb.dx == horizontal)
+            if (rb.outIdx >= 0)
             {
-                for (int i = 0; i < m_HorizJoins.Count; i++)
+                if (rb.dx == horizontal)
                 {
-                    IntPoint pt = new IntPoint(), pt2 = new IntPoint(); //used as dummy params.
-                    HorzJoinRec hj = m_HorizJoins[i];
-                    //if horizontals rb and hj.edge overlap, flag for joining later ...
-                    if (GetOverlapSegment(new IntPoint(hj.edge.xbot, hj.edge.ybot),
-                        new IntPoint(hj.edge.xtop, hj.edge.ytop),
-                        new IntPoint(rb.xbot, rb.ybot),
-                        new IntPoint(rb.xtop, rb.ytop), 
-                        ref pt, ref pt2))
-                        AddJoin(hj.edge, rb, hj.savedIdx, -1);
+                    for (int i = 0; i < m_HorizJoins.Count; i++)
+                    {
+                        IntPoint pt = new IntPoint(), pt2 = new IntPoint(); //used as dummy params.
+                        HorzJoinRec hj = m_HorizJoins[i];
+                        //if horizontals rb and hj.edge overlap, flag for joining later ...
+                        if (GetOverlapSegment(new IntPoint(hj.edge.xbot, hj.edge.ybot),
+                            new IntPoint(hj.edge.xtop, hj.edge.ytop),
+                            new IntPoint(rb.xbot, rb.ybot),
+                            new IntPoint(rb.xtop, rb.ytop), 
+                            ref pt, ref pt2))
+                                AddJoin(hj.edge, rb, hj.savedIdx);
+                    }
                 }
             }
 
@@ -1266,7 +1215,7 @@ namespace ClipperLib
             {
                 if (rb.outIdx >= 0 && rb.prevInAEL.outIdx >= 0 && 
                     SlopesEqual(rb.prevInAEL, rb, m_UseFullRange))
-                    AddJoin(rb, rb.prevInAEL, -1, -1);
+                    AddJoin(rb, rb.prevInAEL);
 
               TEdge e = lb.nextInAEL;
               IntPoint pt = new IntPoint(lb.xcurr, lb.ycurr);
@@ -1313,105 +1262,46 @@ namespace ClipperLib
 
         private bool E2InsertsBeforeE1(TEdge e1, TEdge e2)
         {
-          return e2.xcurr == e1.xcurr? e2.dx > e1.dx : e2.xcurr < e1.xcurr;
+          if (e2.xcurr == e1.xcurr) return e2.dx > e1.dx;
+          else return e2.xcurr < e1.xcurr;
         }
         //------------------------------------------------------------------------------
 
-        private bool IsEvenOddFillType(TEdge edge) 
+        private bool IsNonZeroFillType(TEdge edge) 
         {
           if (edge.polyType == PolyType.ptSubject)
-              return m_SubjFillType == PolyFillType.pftEvenOdd; 
-          else
-              return m_ClipFillType == PolyFillType.pftEvenOdd;
+            return m_SubjFillType == PolyFillType.pftNonZero; else
+            return m_ClipFillType == PolyFillType.pftNonZero;
         }
         //------------------------------------------------------------------------------
 
-        private bool IsEvenOddAltFillType(TEdge edge) 
+        private bool IsNonZeroAltFillType(TEdge edge) 
         {
           if (edge.polyType == PolyType.ptSubject)
-              return m_ClipFillType == PolyFillType.pftEvenOdd; 
-          else
-              return m_SubjFillType == PolyFillType.pftEvenOdd;
+            return m_ClipFillType == PolyFillType.pftNonZero; else
+            return m_SubjFillType == PolyFillType.pftNonZero;
         }
         //------------------------------------------------------------------------------
 
         private bool IsContributing(TEdge edge)
         {
-            PolyFillType pft, pft2;
-            if (edge.polyType == PolyType.ptSubject)
-            {
-                pft = m_SubjFillType;
-                pft2 = m_ClipFillType;
-            }
-            else
-            {
-                pft = m_ClipFillType;
-                pft2 = m_SubjFillType;
-            }
-
-            switch (pft)
-            {
-                case PolyFillType.pftEvenOdd:
-                case PolyFillType.pftNonZero:
-                    if (Math.Abs(edge.windCnt) != 1) return false;
-                    break;
-                case PolyFillType.pftPositive:
-                    if (edge.windCnt != 1) return false;
-                    break;
-                default: //PolyFillType.pftNegative
-                    if (edge.windCnt != -1) return false; 
-                    break;
-            }
-
             switch (m_ClipType)
             {
                 case ClipType.ctIntersection:
-                    switch (pft2)
-                    {
-                        case PolyFillType.pftEvenOdd:
-                        case PolyFillType.pftNonZero:
-                            return (edge.windCnt2 != 0);
-                        case PolyFillType.pftPositive:
-                            return (edge.windCnt2 > 0);
-                        default:
-                            return (edge.windCnt2 < 0);
-                    }
+                    if (edge.polyType == PolyType.ptSubject)
+                        return Math.Abs(edge.windCnt) == 1 && edge.windCnt2 != 0;
+                    else
+                        return Math.Abs(edge.windCnt2) > 0 && Math.Abs(edge.windCnt) == 1;
                 case ClipType.ctUnion:
-                    switch (pft2)
-                    {
-                        case PolyFillType.pftEvenOdd:
-                        case PolyFillType.pftNonZero:
-                            return (edge.windCnt2 == 0);
-                        case PolyFillType.pftPositive:
-                            return (edge.windCnt2 <= 0);
-                        default:
-                            return (edge.windCnt2 >= 0);
-                    }
+                    return Math.Abs(edge.windCnt) == 1 && edge.windCnt2 == 0;
                 case ClipType.ctDifference:
                     if (edge.polyType == PolyType.ptSubject)
-                        switch (pft2)
-                        {
-                            case PolyFillType.pftEvenOdd:
-                            case PolyFillType.pftNonZero:
-                                return (edge.windCnt2 == 0);
-                            case PolyFillType.pftPositive:
-                                return (edge.windCnt2 <= 0);
-                            default:
-                                return (edge.windCnt2 >= 0);
-                        }
+                        return Math.Abs(edge.windCnt) == 1 && edge.windCnt2 == 0;
                     else
-                        switch (pft2)
-                        {
-                            case PolyFillType.pftEvenOdd:
-                            case PolyFillType.pftNonZero:
-                                return (edge.windCnt2 != 0);
-                            case PolyFillType.pftPositive:
-                                return (edge.windCnt2 > 0);
-                            default:
-                                return (edge.windCnt2 < 0);
-                        }
+                        return Math.Abs(edge.windCnt) == 1 && edge.windCnt2 != 0;
+                default: //case ctXor:
+                    return Math.Abs(edge.windCnt) == 1;
             }
-            return true;
         }
         //------------------------------------------------------------------------------
 
@@ -1427,14 +1317,7 @@ namespace ClipperLib
                 edge.windCnt2 = 0;
                 e = m_ActiveEdges; //ie get ready to calc windCnt2
             }
-            else if (IsEvenOddFillType(edge))
-            {
-                //even-odd filling ...
-                edge.windCnt = 1;
-                edge.windCnt2 = e.windCnt2;
-                e = e.nextInAEL; //ie get ready to calc windCnt2
-            }
-            else
+            else if (IsNonZeroFillType(edge))
             {
                 //nonZero filling ...
                 if (e.windCnt * e.windDelta < 0)
@@ -1461,23 +1344,30 @@ namespace ClipperLib
                 edge.windCnt2 = e.windCnt2;
                 e = e.nextInAEL; //ie get ready to calc windCnt2
             }
-
-            //update windCnt2 ...
-            if (IsEvenOddAltFillType(edge))
+            else
             {
                 //even-odd filling ...
-                while (e != edge)
-                {
-                    edge.windCnt2 = (edge.windCnt2 == 0) ? 1 : 0;
-                    e = e.nextInAEL;
-                }
+                edge.windCnt = 1;
+                edge.windCnt2 = e.windCnt2;
+                e = e.nextInAEL; //ie get ready to calc windCnt2
             }
-            else
+
+            //update windCnt2 ...
+            if (IsNonZeroAltFillType(edge))
             {
                 //nonZero filling ...
                 while (e != edge)
                 {
                     edge.windCnt2 += e.windDelta;
+                    e = e.nextInAEL;
+                }
+            }
+            else
+            {
+                //even-odd filling ...
+                while (e != edge)
+                {
+                    edge.windCnt2 = (edge.windCnt2 == 0) ? 1 : 0;
                     e = e.nextInAEL;
                 }
             }
@@ -1508,10 +1398,15 @@ namespace ClipperLib
         {
             TEdge e = m_ActiveEdges;
             m_SortedEdges = e;
+            if (m_ActiveEdges == null)
+                return;
+            m_SortedEdges.prevInSEL = null;
+            e = e.nextInAEL;
             while (e != null)
             {
                 e.prevInSEL = e.prevInAEL;
-                e.nextInSEL = e.nextInAEL;
+                e.prevInSEL.nextInSEL = e;
+                e.nextInSEL = null;
                 e = e.nextInAEL;
             }
         }
@@ -1519,6 +1414,11 @@ namespace ClipperLib
 
         private void SwapPositionsInAEL(TEdge edge1, TEdge edge2)
         {
+            if (edge1.nextInAEL == null && edge1.prevInAEL == null)
+                return;
+            if (edge2.nextInAEL == null && edge2.prevInAEL == null)
+                return;
+
             if (edge1.nextInAEL == edge2)
             {
                 TEdge next = edge2.nextInAEL;
@@ -1637,27 +1537,18 @@ namespace ClipperLib
                 e1.outIdx = -1;
                 e2.outIdx = -1;
             }
-            else if (e1.outIdx < e2.outIdx) 
-                AppendPolygon(e1, e2);
-            else 
-                AppendPolygon(e2, e1);
+            else AppendPolygon(e1, e2);
         }
         //------------------------------------------------------------------------------
 
         private void AddLocalMinPoly(TEdge e1, TEdge e2, IntPoint pt)
         {
-            TEdge e, prevE;
             if (e2.dx == horizontal || (e1.dx > e2.dx))
             {
                 AddOutPt(e1, pt);
                 e2.outIdx = e1.outIdx;
                 e1.side = EdgeSide.esLeft;
                 e2.side = EdgeSide.esRight;
-                e = e1;
-                if (e.prevInAEL == e2)
-                  prevE = e2.prevInAEL; 
-                else
-                  prevE = e.prevInAEL;
             }
             else
             {
@@ -1665,18 +1556,7 @@ namespace ClipperLib
                 e1.outIdx = e2.outIdx;
                 e1.side = EdgeSide.esRight;
                 e2.side = EdgeSide.esLeft;
-                e = e2;
-                if (e.prevInAEL == e1)
-                    prevE = e1.prevInAEL;
-                else
-                    prevE = e.prevInAEL;
             }
-
-            if (prevE != null && prevE.outIdx >= 0 &&
-                (TopX(prevE, pt.Y) == TopX(e, pt.Y)) &&
-                 SlopesEqual(e, prevE, m_UseFullRange))
-                   AddJoin(e, prevE, -1, -1);
-
         }
         //------------------------------------------------------------------------------
 
@@ -1686,9 +1566,8 @@ namespace ClipperLib
           result.idx = -1;
           result.isHole = false;
           result.FirstLeft = null;
+          result.AppendLink = null;
           result.pts = null;
-          result.bottomPt = null;
-          result.polyNode = null;
           return result;
         }
         //------------------------------------------------------------------------------
@@ -1713,16 +1592,14 @@ namespace ClipperLib
           } else
           {
               OutRec outRec = m_PolyOuts[e.outIdx];
-              OutPt op = outRec.pts, op2;
+              OutPt op = outRec.pts;
               if (ToFront && PointsEqual(pt, op.pt) || 
                   (!ToFront && PointsEqual(pt, op.prev.pt))) return;
-
-              op2 = new OutPt();
+              OutPt op2 = new OutPt();
               op2.pt = pt;
               op2.idx = outRec.idx;
               if (op2.pt.Y == outRec.bottomPt.pt.Y &&
-                op2.pt.X < outRec.bottomPt.pt.X)
-                  outRec.bottomPt = op2;
+                op2.pt.X < outRec.bottomPt.pt.X) outRec.bottomPt = op2;
               op2.next = op;
               op2.prev = op.prev;
               op2.prev.next = op2;
@@ -1731,6 +1608,7 @@ namespace ClipperLib
           }
         }
         //------------------------------------------------------------------------------
+
 
         internal void SwapPoints(ref IntPoint pt1, ref IntPoint pt2)
         {
@@ -1744,7 +1622,7 @@ namespace ClipperLib
             IntPoint pt2b, ref IntPoint pt1, ref IntPoint pt2)
         {
             //precondition: segments are colinear.
-            if (Math.Abs(pt1a.X - pt1b.X) > Math.Abs(pt1a.Y - pt1b.Y))
+            if ( pt1a.Y == pt1b.Y || Math.Abs((pt1a.X - pt1b.X)/(pt1a.Y - pt1b.Y)) > 1 )
             {
             if (pt1a.X > pt1b.X) SwapPoints(ref pt1a, ref pt1b);
             if (pt2a.X > pt2b.X) SwapPoints(ref pt2a, ref pt2b);
@@ -1762,8 +1640,21 @@ namespace ClipperLib
         }
         //------------------------------------------------------------------------------
 
-        private bool FindSegment(ref OutPt pp, bool UseFullInt64Range, 
-            ref IntPoint pt1, ref IntPoint pt2)
+        private OutPt PolygonBottom(OutPt pp)
+        {
+            OutPt p = pp.next;
+            OutPt result = pp;
+            while (p != pp)
+            {
+            if (p.pt.Y > result.pt.Y) result = p;
+            else if (p.pt.Y == result.pt.Y && p.pt.X < result.pt.X) result = p;
+            p = p.next;
+            }
+            return result;
+        }
+        //------------------------------------------------------------------------------
+
+        private bool FindSegment(ref OutPt pp, ref IntPoint pt1, ref IntPoint pt2)
         {
             if (pp == null) return false;
             OutPt pp2 = pp;
@@ -1771,8 +1662,8 @@ namespace ClipperLib
             IntPoint pt2a = new IntPoint(pt2);
             do
             {
-                if (SlopesEqual(pt1a, pt2a, pp.pt, pp.prev.pt, UseFullInt64Range) &&
-                    SlopesEqual(pt1a, pt2a, pp.pt, UseFullInt64Range) &&
+                if (SlopesEqual(pt1a, pt2a, pp.pt, pp.prev.pt, true) &&
+                    SlopesEqual(pt1a, pt2a, pp.pt, true) &&
                     GetOverlapSegment(pt1a, pt2a, pp.pt, pp.prev.pt, ref pt1, ref pt2))
                         return true;
             pp = pp.next;
@@ -1829,117 +1720,77 @@ namespace ClipperLib
         }
         //------------------------------------------------------------------------------
 
-        private double GetDx(IntPoint pt1, IntPoint pt2)
-        {
-            if (pt1.Y == pt2.Y) return horizontal;
-            else return (double)(pt2.X - pt1.X) / (pt2.Y - pt1.Y);
-        }
-        //---------------------------------------------------------------------------
+    private double GetDx(IntPoint pt1, IntPoint pt2)
+    {
+        if (pt1.Y == pt2.Y) return horizontal;
+        else return (double)(pt2.X - pt1.X) / (double)(pt2.Y - pt1.Y);
+    }
+    //---------------------------------------------------------------------------
 
-        private bool FirstIsBottomPt(OutPt btmPt1, OutPt btmPt2)
-        {
-          OutPt p = btmPt1.prev;
-          while (PointsEqual(p.pt, btmPt1.pt) && (p != btmPt1)) p = p.prev;
-          double dx1p = Math.Abs(GetDx(btmPt1.pt, p.pt));
-          p = btmPt1.next;
-          while (PointsEqual(p.pt, btmPt1.pt) && (p != btmPt1)) p = p.next;
-          double dx1n = Math.Abs(GetDx(btmPt1.pt, p.pt));
+    bool GetNextNonDupOutPt(OutPt pp, out OutPt next)
+    {
+      next = pp.next;
+      while (next != pp && PointsEqual(pp.pt, next.pt))
+        next = next.next;
+      return next != pp;
+    }
+    //------------------------------------------------------------------------------
 
-          p = btmPt2.prev;
-          while (PointsEqual(p.pt, btmPt2.pt) && (p != btmPt2)) p = p.prev;
-          double dx2p = Math.Abs(GetDx(btmPt2.pt, p.pt));
-          p = btmPt2.next;
-          while (PointsEqual(p.pt, btmPt2.pt) && (p != btmPt2)) p = p.next;
-          double dx2n = Math.Abs(GetDx(btmPt2.pt, p.pt));
-          return (dx1p >= dx2p && dx1p >= dx2n) || (dx1n >= dx2p && dx1n >= dx2n);
-        }
-        //------------------------------------------------------------------------------
+    bool GetPrevNonDupOutPt(OutPt pp, out OutPt prev)
+    {
+      prev = pp.prev;
+      while (prev != pp && PointsEqual(pp.pt, prev.pt))
+        prev = prev.prev;
+      return prev != pp;
+    }
+    //------------------------------------------------------------------------------
 
-        private OutPt GetBottomPt(OutPt pp)
-        {
-          OutPt dups = null;
-          OutPt p = pp.next;
-          while (p != pp)
-          {
-            if (p.pt.Y > pp.pt.Y)
-            {
-              pp = p;
-              dups = null;
-            }
-            else if (p.pt.Y == pp.pt.Y && p.pt.X <= pp.pt.X)
-            {
-              if (p.pt.X < pp.pt.X)
-              {
-                  dups = null;
-                  pp = p;
-              } else
-              {
-                if (p.next != pp && p.prev != pp) dups = p;
-              }
-            }
-            p = p.next;
-          }
-          if (dups != null)
-          {
-            //there appears to be at least 2 vertices at bottomPt so ...
-            while (dups != p)
-            {
-              if (!FirstIsBottomPt(p, dups)) pp = dups;
-              dups = dups.next;
-              while (!PointsEqual(dups.pt, pp.pt)) dups = dups.next;
-            }
-          }
-          return pp;
-        }
-        //------------------------------------------------------------------------------
-
-        private OutRec GetLowermostRec(OutRec outRec1, OutRec outRec2)
-        {
-            //work out which polygon fragment has the correct hole state ...
-            OutPt bPt1 = outRec1.bottomPt;
-            OutPt bPt2 = outRec2.bottomPt;
-            if (bPt1.pt.Y > bPt2.pt.Y) return outRec1;
-            else if (bPt1.pt.Y < bPt2.pt.Y) return outRec2;
-            else if (bPt1.pt.X < bPt2.pt.X) return outRec1;
-            else if (bPt1.pt.X > bPt2.pt.X) return outRec2;
-            else if (bPt1.next == bPt1) return outRec2;
-            else if (bPt2.next == bPt2) return outRec1;
-            else if (FirstIsBottomPt(bPt1, bPt2)) return outRec1;
-            else return outRec2;
-        }
-        //------------------------------------------------------------------------------
-
-        bool Param1RightOfParam2(OutRec outRec1, OutRec outRec2)
-        {
-            do
-            {
-                outRec1 = outRec1.FirstLeft;
-                if (outRec1 == outRec2) return true;
-            } while (outRec1 != null);
-            return false;
-        }
-        //------------------------------------------------------------------------------
-
-        private void AppendPolygon(TEdge e1, TEdge e2)
+    private void AppendPolygon(TEdge e1, TEdge e2)
         {
           //get the start and ends of both output polygons ...
           OutRec outRec1 = m_PolyOuts[e1.outIdx];
           OutRec outRec2 = m_PolyOuts[e2.outIdx];
 
+          //work out which polygon fragment has the correct hole state ...
           OutRec holeStateRec;
-          if (Param1RightOfParam2(outRec1, outRec2)) 
-              holeStateRec = outRec2;
-          else if (Param1RightOfParam2(outRec2, outRec1))
-              holeStateRec = outRec1;
+          OutPt next1, next2, prev1, prev2;
+          OutPt bPt1 = outRec1.bottomPt;
+          OutPt bPt2 = outRec2.bottomPt;
+          if (bPt1.pt.Y > bPt2.pt.Y) holeStateRec = outRec1;
+          else if (bPt1.pt.Y < bPt2.pt.Y) holeStateRec = outRec2;
+          else if (bPt1.pt.X < bPt2.pt.X) holeStateRec = outRec1;
+          else if (bPt1.pt.X > bPt2.pt.X) holeStateRec = outRec2;
+          else if (!GetNextNonDupOutPt(bPt1, out next1)) holeStateRec = outRec2;
+          else if (!GetNextNonDupOutPt(bPt2, out next2)) holeStateRec = outRec1;
           else
-              holeStateRec = GetLowermostRec(outRec1, outRec2);
+          {
+              GetPrevNonDupOutPt(bPt1, out prev1);
+              GetPrevNonDupOutPt(bPt2, out prev2);
+              double dx1 = GetDx(bPt1.pt, next1.pt);
+              double dx2 = GetDx(bPt1.pt, prev1.pt);
+              if (dx2 > dx1) dx1 = dx2;
+              dx2 = GetDx(bPt2.pt, next2.pt);
+              if (dx2 > dx1) holeStateRec = outRec2;
+              else
+              {
+                  dx2 = GetDx(bPt2.pt, prev2.pt);
+                  if (dx2 > dx1) holeStateRec = outRec2;
+                  else holeStateRec = outRec1;
+              }
+          }
+
+          //fixup hole status ...
+          if (outRec1.isHole != outRec2.isHole)
+              if (holeStateRec == outRec2)
+                  outRec1.isHole = outRec2.isHole; else
+                  outRec2.isHole = outRec1.isHole;
 
           OutPt p1_lft = outRec1.pts;
           OutPt p1_rt = p1_lft.prev;
           OutPt p2_lft = outRec2.pts;
           OutPt p2_rt = p2_lft.prev;
 
-          EdgeSide side;
+        EdgeSide side;
           //join e2 poly onto e1 poly and delete pointers to e2 ...
           if(  e1.side == EdgeSide.esLeft )
           {
@@ -1989,13 +1840,10 @@ namespace ClipperLib
               outRec1.bottomPt.idx = outRec1.idx;
               if (outRec2.FirstLeft != outRec1)
                   outRec1.FirstLeft = outRec2.FirstLeft;
-              outRec1.isHole = outRec2.isHole;
           }
           outRec2.pts = null;
           outRec2.bottomPt = null;
-
-          outRec2.FirstLeft = outRec1;
-
+          outRec2.AppendLink = outRec1;
           int OKIdx = e1.outIdx;
           int ObsoleteIdx = e2.outIdx;
 
@@ -2032,7 +1880,6 @@ namespace ClipperLib
 
         private void ReversePolyPtLinks(OutPt pp)
         {
-            if (pp == null) return;
             OutPt pp1;
             OutPt pp2;
             pp1 = pp;
@@ -2103,68 +1950,32 @@ namespace ClipperLib
             //assumes that e1 will be to the right of e2 ABOVE the intersection
             if (e1.polyType == e2.polyType)
             {
-                if (IsEvenOddFillType(e1))
-                {
-                    int oldE1WindCnt = e1.windCnt;
-                    e1.windCnt = e2.windCnt;
-                    e2.windCnt = oldE1WindCnt;
-                }
-                else
+                if (IsNonZeroFillType(e1))
                 {
                     if (e1.windCnt + e2.windDelta == 0) e1.windCnt = -e1.windCnt;
                     else e1.windCnt += e2.windDelta;
                     if (e2.windCnt - e1.windDelta == 0) e2.windCnt = -e2.windCnt;
                     else e2.windCnt -= e1.windDelta;
                 }
+                else
+                {
+                    int oldE1WindCnt = e1.windCnt;
+                    e1.windCnt = e2.windCnt;
+                    e2.windCnt = oldE1WindCnt;
+                }
             }
             else
             {
-                if (!IsEvenOddFillType(e2)) e1.windCnt2 += e2.windDelta;
+                if (IsNonZeroFillType(e2)) e1.windCnt2 += e2.windDelta;
                 else e1.windCnt2 = (e1.windCnt2 == 0) ? 1 : 0;
-                if (!IsEvenOddFillType(e1)) e2.windCnt2 -= e1.windDelta;
+                if (IsNonZeroFillType(e1)) e2.windCnt2 -= e1.windDelta;
                 else e2.windCnt2 = (e2.windCnt2 == 0) ? 1 : 0;
-            }
-
-            PolyFillType e1FillType, e2FillType, e1FillType2, e2FillType2;
-            if (e1.polyType == PolyType.ptSubject)
-            {
-                e1FillType = m_SubjFillType;
-                e1FillType2 = m_ClipFillType;
-            }
-            else
-            {
-                e1FillType = m_ClipFillType;
-                e1FillType2 = m_SubjFillType;
-            }
-            if (e2.polyType == PolyType.ptSubject)
-            {
-                e2FillType = m_SubjFillType;
-                e2FillType2 = m_ClipFillType;
-            }
-            else
-            {
-                e2FillType = m_ClipFillType;
-                e2FillType2 = m_SubjFillType;
-            }
-
-            int e1Wc, e2Wc;
-            switch (e1FillType)
-            {
-                case PolyFillType.pftPositive: e1Wc = e1.windCnt; break;
-                case PolyFillType.pftNegative: e1Wc = -e1.windCnt; break;
-                default: e1Wc = Math.Abs(e1.windCnt); break;
-            }
-            switch (e2FillType)
-            {
-                case PolyFillType.pftPositive: e2Wc = e2.windCnt; break;
-                case PolyFillType.pftNegative: e2Wc = -e2.windCnt; break;
-                default: e2Wc = Math.Abs(e2.windCnt); break;
             }
 
             if (e1Contributing && e2contributing)
             {
-                if ( e1stops || e2stops || 
-                  (e1Wc != 0 && e1Wc != 1) || (e2Wc != 0 && e2Wc != 1) ||
+                if (e1stops || e2stops || Math.Abs(e1.windCnt) > 1 ||
+                  Math.Abs(e2.windCnt) > 1 ||
                   (e1.polyType != e2.polyType && m_ClipType != ClipType.ctXor))
                     AddLocalMaxPoly(e1, e2, pt);
                 else
@@ -2172,51 +1983,65 @@ namespace ClipperLib
             }
             else if (e1Contributing)
             {
-                if (e2Wc == 0 || e2Wc == 1) DoEdge1(e1, e2, pt);
+                if (m_ClipType == ClipType.ctIntersection)
+                {
+                    if ((e2.polyType == PolyType.ptSubject || e2.windCnt2 != 0) &&
+                        Math.Abs(e2.windCnt) < 2)
+                        DoEdge1(e1, e2, pt);
+                }
+                else
+                {
+                    if (Math.Abs(e2.windCnt) < 2)
+                        DoEdge1(e1, e2, pt);
+                }
             }
             else if (e2contributing)
             {
-                if (e1Wc == 0 || e1Wc == 1) DoEdge2(e1, e2, pt);
+                if (m_ClipType == ClipType.ctIntersection)
+                {
+                    if ((e1.polyType == PolyType.ptSubject || e1.windCnt2 != 0) &&
+                  Math.Abs(e1.windCnt) < 2) DoEdge2(e1, e2, pt);
+                }
+                else
+                {
+                    if (Math.Abs(e1.windCnt) < 2)
+                        DoEdge2(e1, e2, pt);
+                }
             }
-            else if ( (e1Wc == 0 || e1Wc == 1) && 
-                (e2Wc == 0 || e2Wc == 1) && !e1stops && !e2stops )
+            else if (Math.Abs(e1.windCnt) < 2 && Math.Abs(e2.windCnt) < 2 && !e1stops && !e2stops)
             {
-                //neither edge is currently contributing ...
-                Int64 e1Wc2, e2Wc2;
-                switch (e1FillType2)
-                {
-                    case PolyFillType.pftPositive: e1Wc2 = e1.windCnt2; break;
-                    case PolyFillType.pftNegative: e1Wc2 = -e1.windCnt2; break;
-                    default: e1Wc2 = Math.Abs(e1.windCnt2); break;
-                }
-                switch (e2FillType2)
-                {
-                    case PolyFillType.pftPositive: e2Wc2 = e2.windCnt2; break;
-                    case PolyFillType.pftNegative: e2Wc2 = -e2.windCnt2; break;
-                    default: e2Wc2 = Math.Abs(e2.windCnt2); break;
-                }
-
+                //nb: neither edge is currently contributing ...
                 if (e1.polyType != e2.polyType)
                     AddLocalMinPoly(e1, e2, pt);
-                else if (e1Wc == 1 && e2Wc == 1)
+                else if (Math.Abs(e1.windCnt) == 1 && Math.Abs(e2.windCnt) == 1)
                     switch (m_ClipType)
                     {
                         case ClipType.ctIntersection:
-                            if (e1Wc2 > 0 && e2Wc2 > 0)
-                                AddLocalMinPoly(e1, e2, pt);
-                            break;
-                        case ClipType.ctUnion:
-                            if (e1Wc2 <= 0 && e2Wc2 <= 0)
-                                AddLocalMinPoly(e1, e2, pt);
-                            break;
-                        case ClipType.ctDifference:
-                            if (((e1.polyType == PolyType.ptClip) && (e1Wc2 > 0) && (e2Wc2 > 0)) ||
-                                ((e1.polyType == PolyType.ptSubject) && (e1Wc2 <= 0) && (e2Wc2 <= 0)))
+                            {
+                                if (Math.Abs(e1.windCnt2) > 0 && Math.Abs(e2.windCnt2) > 0)
                                     AddLocalMinPoly(e1, e2, pt);
-                            break;
+                                break;
+                            }
+                        case ClipType.ctUnion:
+                            {
+                                if (e1.windCnt2 == 0 && e2.windCnt2 == 0)
+                                    AddLocalMinPoly(e1, e2, pt);
+                                break;
+                            }
+                        case ClipType.ctDifference:
+                            {
+                                if ((e1.polyType == PolyType.ptClip && e2.polyType == PolyType.ptClip &&
+                              e1.windCnt2 != 0 && e2.windCnt2 != 0) ||
+                              (e1.polyType == PolyType.ptSubject && e2.polyType == PolyType.ptSubject &&
+                              e1.windCnt2 == 0 && e2.windCnt2 == 0))
+                                    AddLocalMinPoly(e1, e2, pt);
+                                break;
+                            }
                         case ClipType.ctXor:
-                            AddLocalMinPoly(e1, e2, pt);
-                            break;
+                            {
+                                AddLocalMinPoly(e1, e2, pt);
+                                break;
+                            }
                     }
                 else 
                     SwapSides(e1, e2);
@@ -2329,27 +2154,26 @@ namespace ClipperLib
             TEdge e = GetNextInAEL(horzEdge, Direction);
             while (e != null)
             {
-                if (e.xcurr == horzEdge.xtop && eMaxPair == null)
-                {
-                    if (SlopesEqual(e, horzEdge.nextInLML, m_UseFullRange))
-                    {
-                        //if output polygons share an edge, they'll need joining later ...
-                        if (horzEdge.outIdx >= 0 && e.outIdx >= 0)
-                            AddJoin(horzEdge.nextInLML, e, horzEdge.outIdx, -1);
-                        break; //we've reached the end of the horizontal line
-                    }
-                    else if (e.dx < horzEdge.nextInLML.dx)
-                        //we really have got to the end of the intermediate horz edge so quit.
-                        //nb: More -ve slopes follow more +ve slopes ABOVE the horizontal.
-                        break;
-                }
-                
                 TEdge eNext = GetNextInAEL(e, Direction);
                 if (eMaxPair != null ||
-                  ((Direction == Direction.dLeftToRight) && (e.xcurr < horzRight)) ||
-                  ((Direction == Direction.dRightToLeft) && (e.xcurr > horzLeft)))
+                  ((Direction == Direction.dLeftToRight) && (e.xcurr <= horzRight)) ||
+                  ((Direction == Direction.dRightToLeft) && (e.xcurr >= horzLeft)))
                 {
-                    //so far we're still in range of the horizontal edge
+                    //ok, so far it looks like we're still in range of the horizontal edge
+                    if (e.xcurr == horzEdge.xtop && eMaxPair == null)
+                    {
+                        if (SlopesEqual(e, horzEdge.nextInLML, m_UseFullRange))
+                        {
+                            //if output polygons share an edge, they'll need joining later ...
+                            if (horzEdge.outIdx >= 0 && e.outIdx >= 0)
+                                AddJoin(horzEdge.nextInLML, e, horzEdge.outIdx);
+                            break; //we've reached the end of the horizontal line
+                        }
+                        else if (e.dx < horzEdge.nextInLML.dx)
+                            //we really have got to the end of the intermediate horz edge so quit.
+                            //nb: More -ve slopes follow more +ve slopes ABOVE the horizontal.
+                            break;
+                    }
 
                     if (e == eMaxPair)
                     {
@@ -2382,8 +2206,10 @@ namespace ClipperLib
                     }
                     SwapPositionsInAEL(horzEdge, e);
                 }
-                else if ( (Direction == Direction.dLeftToRight && e.xcurr >= horzRight) || 
-                    (Direction == Direction.dRightToLeft && e.xcurr <= horzLeft) ) break;
+                else if ( (Direction == Direction.dLeftToRight && 
+                    e.xcurr > horzRight && horzEdge.nextInSEL == null) || 
+                    (Direction == Direction.dRightToLeft && 
+                    e.xcurr < horzLeft && horzEdge.nextInSEL == null) ) break;
                 e = eNext;
             } //end while ( e )
 
@@ -2419,7 +2245,8 @@ namespace ClipperLib
 
         private TEdge GetNextInAEL(TEdge e, Direction Direction)
         {
-            return Direction == Direction.dLeftToRight ? e.nextInAEL: e.prevInAEL;
+            if (Direction == Direction.dLeftToRight) return e.nextInAEL;
+            else return e.prevInAEL;
         }
         //------------------------------------------------------------------------------
 
@@ -2449,13 +2276,13 @@ namespace ClipperLib
         }
         //------------------------------------------------------------------------------
 
-        private bool ProcessIntersections(Int64 botY, Int64 topY)
+        private bool ProcessIntersections(Int64 topY)
         {
           if( m_ActiveEdges == null ) return true;
           try {
-            BuildIntersectList(botY, topY);
+            BuildIntersectList(topY);
             if ( m_IntersectNodes == null) return true;
-            if ( FixupIntersectionOrder() ) ProcessIntersectList();
+            if ( FixupIntersections() ) ProcessIntersectList();
             else return false;
           }
           catch {
@@ -2467,18 +2294,22 @@ namespace ClipperLib
         }
         //------------------------------------------------------------------------------
 
-        private void BuildIntersectList(Int64 botY, Int64 topY)
+        private void BuildIntersectList(Int64 topY)
         {
           if ( m_ActiveEdges == null ) return;
 
           //prepare for sorting ...
           TEdge e = m_ActiveEdges;
+          e.tmpX = TopX( e, topY );
           m_SortedEdges = e;
+          m_SortedEdges.prevInSEL = null;
+          e = e.nextInAEL;
           while( e != null )
           {
             e.prevInSEL = e.prevInAEL;
-            e.nextInSEL = e.nextInAEL;
-            e.xcurr = TopX( e, topY );
+            e.prevInSEL.nextInSEL = e;
+            e.nextInSEL = null;
+            e.tmpX = TopX( e, topY );
             e = e.nextInAEL;
           }
 
@@ -2492,18 +2323,11 @@ namespace ClipperLib
             {
               TEdge eNext = e.nextInSEL;
               IntPoint pt = new IntPoint();
-              if (e.xcurr > eNext.xcurr)
+              if(e.tmpX > eNext.tmpX && IntersectPoint(e, eNext, ref pt))
               {
-                  if (!IntersectPoint(e, eNext, ref pt) && e.xcurr > eNext.xcurr +1)
-                      throw new ClipperException("Intersection error");
-                  if (pt.Y > botY)
-                  {
-                      pt.Y = botY;
-                      pt.X = TopX(e, pt.Y);
-                  }
-                  AddIntersectNode(e, eNext, pt);
-                  SwapPositionsInSEL(e, eNext);
-                  isModified = true;
+                AddIntersectNode( e, eNext, pt );
+                SwapPositionsInSEL(e, eNext);
+                isModified = true;
               }
               else
                 e = eNext;
@@ -2515,7 +2339,7 @@ namespace ClipperLib
         }
         //------------------------------------------------------------------------------
 
-        private bool FixupIntersectionOrder()
+        private bool FixupIntersections()
         {
           if ( m_IntersectNodes.next == null ) return true;
 
@@ -2575,7 +2399,7 @@ namespace ClipperLib
 
         private static Int64 Round(double value)
         {
-            return value < 0 ? (Int64)(value - 0.5) : (Int64)(value + 0.5);
+            if ((value < 0)) return (Int64)(value - 0.5); else return (Int64)(value + 0.5);
         }
         //------------------------------------------------------------------------------
 
@@ -2587,6 +2411,20 @@ namespace ClipperLib
         }
         //------------------------------------------------------------------------------
 
+        private Int64 TopX(IntPoint pt1, IntPoint pt2, Int64 currentY)
+        {
+          //preconditions: pt1.Y <> pt2.Y and pt1.Y > pt2.Y
+          if (currentY >= pt1.Y) return pt1.X;
+          else if (currentY == pt2.Y) return pt2.X;
+          else if (pt1.X == pt2.X) return pt1.X;
+          else
+          {
+            double q = (pt1.X-pt2.X)/(pt1.Y-pt2.Y);
+            return (Int64)(pt1.X + (currentY - pt1.Y) * q);
+          }
+        }
+        //------------------------------------------------------------------------------
+
         private void AddIntersectNode(TEdge e1, TEdge e2, IntPoint pt)
         {
           IntersectNode newNode = new IntersectNode();
@@ -2595,7 +2433,7 @@ namespace ClipperLib
           newNode.pt = pt;
           newNode.next = null;
           if (m_IntersectNodes == null) m_IntersectNodes = newNode;
-          else if (ProcessParam1BeforeParam2(newNode, m_IntersectNodes))
+          else if( Process1Before2(newNode, m_IntersectNodes) )
           {
             newNode.next = m_IntersectNodes;
             m_IntersectNodes = newNode;
@@ -2603,7 +2441,7 @@ namespace ClipperLib
           else
           {
             IntersectNode iNode = m_IntersectNodes;
-            while (iNode.next != null && ProcessParam1BeforeParam2(iNode.next, newNode))
+            while( iNode.next != null  && Process1Before2(iNode.next, newNode) )
                 iNode = iNode.next;
             newNode.next = iNode.next;
             iNode.next = newNode;
@@ -2611,7 +2449,7 @@ namespace ClipperLib
         }
         //------------------------------------------------------------------------------
 
-        private bool ProcessParam1BeforeParam2(IntersectNode node1, IntersectNode node2)
+        private bool Process1Before2(IntersectNode node1, IntersectNode node2)
         {
           bool result;
           if (node1.pt.Y == node2.pt.Y)
@@ -2619,12 +2457,12 @@ namespace ClipperLib
             if (node1.edge1 == node2.edge1 || node1.edge2 == node2.edge1)
             {
               result = node2.pt.X > node1.pt.X;
-                return node2.edge1.dx > 0 ? !result : result;
+              if (node2.edge1.dx > 0) return !result; else return result;
             }
             else if (node1.edge1 == node2.edge2 || node1.edge2 == node2.edge2)
             {
               result = node2.pt.X > node1.pt.X;
-                return node2.edge2.dx > 0 ? !result : result;
+              if (node2.edge2.dx > 0) return !result; else return result;
             }
             else return node2.pt.X > node1.pt.X;
           }
@@ -2649,69 +2487,44 @@ namespace ClipperLib
         private bool IntersectPoint(TEdge edge1, TEdge edge2, ref IntPoint ip)
         {
           double b1, b2;
-          if (SlopesEqual(edge1, edge2, m_UseFullRange))
-          {
-              if (edge2.ybot > edge1.ybot)
-                ip.Y = edge2.ybot;
-              else
-                ip.Y = edge1.ybot;
-              return false;
-          }
+          if (SlopesEqual(edge1, edge2, m_UseFullRange)) return false;
           else if (edge1.dx == 0)
           {
-              ip.X = edge1.xbot;
-              if (edge2.dx == horizontal)
-              {
-                  ip.Y = edge2.ybot;
-              }
-              else
-              {
-                  b2 = edge2.ybot - (edge2.xbot / edge2.dx);
-                  ip.Y = Round(ip.X / edge2.dx + b2);
-              }
+            ip.X = edge1.xbot;
+            if (edge2.dx == horizontal)
+            {
+              ip.Y = edge2.ybot;
+            } else
+            {
+              b2 = edge2.ybot - (edge2.xbot/edge2.dx);
+              ip.Y = Round(ip.X/edge2.dx + b2);
+            }
           }
           else if (edge2.dx == 0)
           {
-              ip.X = edge2.xbot;
-              if (edge1.dx == horizontal)
-              {
-                  ip.Y = edge1.ybot;
-              }
-              else
-              {
-                  b1 = edge1.ybot - (edge1.xbot / edge1.dx);
-                  ip.Y = Round(ip.X / edge1.dx + b1);
-              }
-          }
-          else
+            ip.X = edge2.xbot;
+            if (edge1.dx == horizontal)
+            {
+              ip.Y = edge1.ybot;
+            } else
+            {
+              b1 = edge1.ybot - (edge1.xbot/edge1.dx);
+              ip.Y = Round(ip.X/edge1.dx + b1);
+            }
+          } else
           {
-              b1 = edge1.xbot - edge1.ybot * edge1.dx;
-              b2 = edge2.xbot - edge2.ybot * edge2.dx;
-              double q = (b2 - b1) / (edge1.dx - edge2.dx);
-              ip.Y = Round(q);
-              if (Math.Abs(edge1.dx) < Math.Abs(edge2.dx))
-                  ip.X = Round(edge1.dx * q + b1);
-              else
-                  ip.X = Round(edge2.dx * q + b2);
+            b1 = edge1.xbot - edge1.ybot * edge1.dx;
+            b2 = edge2.xbot - edge2.ybot * edge2.dx;
+            b2 = (b2-b1)/(edge1.dx - edge2.dx);
+            ip.Y = Round(b2);
+            ip.X = Round(edge1.dx * b2 + b1);
           }
 
-          if (ip.Y < edge1.ytop || ip.Y < edge2.ytop)
-          {
-              if (edge1.ytop > edge2.ytop)
-              {
-                  ip.X = edge1.xtop;
-                  ip.Y = edge1.ytop;
-                  return TopX(edge2, edge1.ytop) < edge1.xtop;
-              }
-              else
-              {
-                  ip.X = edge2.xtop;
-                  ip.Y = edge2.ytop;
-                  return TopX(edge1, edge2.ytop) > edge2.xtop;
-              }
-          }
-          else
-              return true;
+          return
+            //can be *so close* to the top of one edge that the rounded Y equals one ytop ...
+            (ip.Y == edge1.ytop && ip.Y >= edge2.ytop && edge1.tmpX > edge2.tmpX) ||
+            (ip.Y == edge2.ytop && ip.Y >= edge1.ytop && edge1.tmpX > edge2.tmpX) ||
+            (ip.Y > edge1.ytop && ip.Y > edge2.ytop);
         }
         //------------------------------------------------------------------------------
 
@@ -2736,10 +2549,10 @@ namespace ClipperLib
             if( IsMaxima(e, topY) && GetMaximaPair(e).dx != horizontal )
             {
               //'e' might be removed from AEL, as may any following edges so ...
-              TEdge ePrev = e.prevInAEL;
+              TEdge ePrior = e.prevInAEL;
               DoMaxima(e, topY);
-              if( ePrev == null ) e = m_ActiveEdges;
-              else e = ePrev.nextInAEL;
+              if( ePrior == null ) e = m_ActiveEdges;
+              else e = ePrior.nextInAEL;
             }
             else
             {
@@ -2789,24 +2602,27 @@ namespace ClipperLib
               UpdateEdgeIntoAEL(ref e);
 
               //if output polygons share an edge, they'll need joining later ...
-              TEdge ePrev = e.prevInAEL;
-              TEdge eNext = e.nextInAEL;
-              if (ePrev != null && ePrev.xcurr == e.xbot &&
-                ePrev.ycurr == e.ybot && e.outIdx >= 0 &&
-                ePrev.outIdx >= 0 && ePrev.ycurr > ePrev.ytop &&
-                SlopesEqual(e, ePrev, m_UseFullRange))
+              if (e.outIdx >= 0 && e.prevInAEL != null && e.prevInAEL.outIdx >= 0 &&
+                e.prevInAEL.xcurr == e.xbot && e.prevInAEL.ycurr == e.ybot &&
+                SlopesEqual(new IntPoint(e.xbot, e.ybot), new IntPoint(e.xtop, e.ytop),
+                  new IntPoint(e.xbot, e.ybot),
+                  new IntPoint(e.prevInAEL.xtop, e.prevInAEL.ytop), m_UseFullRange))
               {
-                  AddOutPt(ePrev, new IntPoint(e.xbot, e.ybot));
-                  AddJoin(e, ePrev, -1, -1);
+                  AddOutPt(e.prevInAEL, new IntPoint(e.xbot, e.ybot));
+                  AddJoin(e, e.prevInAEL);
               }
-              else if (eNext != null && eNext.xcurr == e.xbot &&
-                eNext.ycurr == e.ybot && e.outIdx >= 0 &&
-                eNext.outIdx >= 0 && eNext.ycurr > eNext.ytop &&
-                SlopesEqual(e, eNext, m_UseFullRange))
+              else if (e.outIdx >= 0 && e.nextInAEL != null && e.nextInAEL.outIdx >= 0 &&
+                e.nextInAEL.ycurr > e.nextInAEL.ytop &&
+                e.nextInAEL.ycurr < e.nextInAEL.ybot &&
+                e.nextInAEL.xcurr == e.xbot && e.nextInAEL.ycurr == e.ybot &&
+                SlopesEqual(new IntPoint(e.xbot, e.ybot), new IntPoint(e.xtop, e.ytop),
+                  new IntPoint(e.xbot, e.ybot),
+                  new IntPoint(e.nextInAEL.xtop, e.nextInAEL.ytop), m_UseFullRange))
               {
-                  AddOutPt(eNext, new IntPoint(e.xbot, e.ybot));
-                  AddJoin(e, eNext, -1, -1);
+                  AddOutPt(e.nextInAEL, new IntPoint(e.xbot, e.ybot));
+                  AddJoin(e, e.nextInAEL);
               }
+
             }
             e = e.nextInAEL;
           }
@@ -2822,8 +2638,7 @@ namespace ClipperLib
           {
             if (eNext == null) throw new ClipperException("DoMaxima error");
             IntersectEdges( e, eNext, new IntPoint(X, topY), Protects.ipBoth );
-            SwapPositionsInAEL(e, eNext);
-            eNext = e.nextInAEL;
+            eNext = eNext.nextInAEL;
           }
           if( e.outIdx < 0 && eMaxPair.outIdx < 0 )
           {
@@ -2838,15 +2653,65 @@ namespace ClipperLib
         }
         //------------------------------------------------------------------------------
 
-        public static void ReversePolygons(Polygons polys)
+        public static bool IsClockwise(Polygon poly, bool UseFullInt64Range = true)
         {
-            polys.ForEach(delegate(Polygon poly) { poly.Reverse(); });
+          int highI = poly.Count -1;
+          if (highI < 2) return false;
+          if (UseFullInt64Range)
+          {
+              Int128 area;
+              area = Int128.Int128Mul(poly[highI].X, poly[0].Y) -
+                Int128.Int128Mul(poly[0].X, poly[highI].Y);
+              for (int i = 0; i < highI; ++i)
+                  area += Int128.Int128Mul(poly[i].X, poly[i + 1].Y) -
+                    Int128.Int128Mul(poly[i + 1].X, poly[i].Y);
+              return area.ToDouble() > 0;
+          }
+          else
+          {
+
+              double area;
+              area = (double)poly[highI].X * (double)poly[0].Y -
+                  (double)poly[0].X * (double)poly[highI].Y;
+              for (int i = 0; i < highI; ++i)
+                  area += (double)poly[i].X * (double)poly[i + 1].Y -
+                      (double)poly[i + 1].X * (double)poly[i].Y;
+              //area := area/2;
+              return area > 0; //reverse of normal formula because assuming Y axis inverted
+          }
         }
         //------------------------------------------------------------------------------
 
-        public static bool Orientation(Polygon poly)
+        private bool IsClockwise(OutRec outRec, bool UseFullInt64Range)
         {
-            return Area(poly) >= 0;
+            OutPt startPt = outRec.pts;
+            OutPt op = startPt;
+            if (UseFullInt64Range)
+            {
+                Int128 area = new Int128(0);
+                do
+                {
+                    area += Int128.Int128Mul(op.pt.X, op.next.pt.Y) -
+                        Int128.Int128Mul(op.next.pt.X, op.pt.Y);
+                    op = op.next;
+                }
+                while (op != startPt);
+                return area.ToDouble() > 0;
+            }
+            else
+            {
+
+                double area = 0;
+                do
+                {
+                    area += (double)op.pt.X * (double)op.next.pt.Y -
+                        (double)op.next.pt.X * (double)op.pt.Y;
+                    op = op.next;
+                }
+                while (op != startPt);
+                //area = area /2;
+                return area > 0; //reverse of normal formula because assuming Y axis inverted
+                }
         }
         //------------------------------------------------------------------------------
 
@@ -2869,9 +2734,8 @@ namespace ClipperLib
         {
             polyg.Clear();
             polyg.Capacity = m_PolyOuts.Count;
-            for (int i = 0; i < m_PolyOuts.Count; i++)
+            foreach (OutRec outRec in m_PolyOuts)
             {
-                OutRec outRec = m_PolyOuts[i];
                 if (outRec.pts == null) continue;
                 OutPt p = outRec.pts;
                 int cnt = PointCount(p);
@@ -2880,47 +2744,48 @@ namespace ClipperLib
                 for (int j = 0; j < cnt; j++)
                 {
                     pg.Add(p.pt);
-                    p = p.prev;
+                    p = p.next;
                 }
                 polyg.Add(pg);
             }
         }
         //------------------------------------------------------------------------------
 
-        private void BuildResult2(PolyTree polytree)
-        {
-            polytree.Clear();
-
-            //add each output polygon/contour to polytree ...
-            polytree.m_AllPolys.Capacity = m_PolyOuts.Count;
-            for (int i = 0; i < m_PolyOuts.Count; i++)
+        private void BuildResultEx(ExPolygons polyg)
+        {         
+            polyg.Clear();
+            polyg.Capacity = m_PolyOuts.Count;
+            int i = 0;
+            while (i < m_PolyOuts.Count)
             {
-                OutRec outRec = m_PolyOuts[i];
-                int cnt = PointCount(outRec.pts);
+                OutRec outRec = m_PolyOuts[i++];
+                if (outRec.pts == null) break; //nb: already sorted here
+                OutPt p = outRec.pts;
+                int cnt = PointCount(p);
                 if (cnt < 3) continue;
-                FixHoleLinkage(outRec);
-                PolyNode pn = new PolyNode();
-                polytree.m_AllPolys.Add(pn);
-                outRec.polyNode = pn;
-                pn.m_polygon.Capacity = cnt;
-                OutPt op = outRec.pts;
+                ExPolygon epg = new ExPolygon();
+                epg.outer = new Polygon(cnt);
+                epg.holes = new Polygons();
                 for (int j = 0; j < cnt; j++)
                 {
-                    pn.m_polygon.Add(op.pt);
-                    op = op.prev;
+                    epg.outer.Add(p.pt);
+                    p = p.next;
                 }
-            }
-
-            //fixup PolyNode links etc ...
-            polytree.m_Childs.Capacity = m_PolyOuts.Count;
-            for (int i = 0; i < m_PolyOuts.Count; i++)
-            {
-                OutRec outRec = m_PolyOuts[i];
-                if (outRec.polyNode == null) continue;
-                if (outRec.FirstLeft == null)
-                    polytree.AddChild(outRec.polyNode);
-                else
-                    outRec.FirstLeft.polyNode.AddChild(outRec.polyNode);
+                while (i < m_PolyOuts.Count)
+                {
+                    outRec = m_PolyOuts[i];
+                    if (outRec.pts == null || !outRec.isHole) break;
+                    Polygon pg = new Polygon();
+                    p = outRec.pts;
+                    do
+                    {
+                        pg.Add(p.pt);
+                        p = p.next;
+                    } while (p != outRec.pts);
+                    epg.holes.Add(pg);
+                    i++;
+                }
+                polyg.Add(epg);
             }
         }
         //------------------------------------------------------------------------------
@@ -2948,7 +2813,13 @@ namespace ClipperLib
                     lastOK = null;
                     OutPt tmp = pp;
                     if (pp == outRec.bottomPt)
-                         outRec.bottomPt = null; //flags need for updating
+                    {
+                        if (tmp.prev.pt.Y > tmp.next.pt.Y)
+                          outRec.bottomPt = tmp.prev; else
+                          outRec.bottomPt = tmp.next;
+                        outRec.pts = outRec.bottomPt;
+                        outRec.bottomPt.idx = outRec.idx;
+                    }
                     pp.prev.next = pp.next;
                     pp.next.prev = pp.prev;
                     pp = pp.prev;
@@ -2961,40 +2832,53 @@ namespace ClipperLib
                     pp = pp.next;
                 }
             }
-          if (outRec.bottomPt == null) 
-          {
-            outRec.bottomPt = GetBottomPt(pp);
-            outRec.bottomPt.idx = outRec.idx;
-            outRec.pts = outRec.bottomPt;
-          }
         }
         //------------------------------------------------------------------------------
 
-        private bool JoinPoints(JoinRec j, out OutPt p1, out OutPt p2)
+        internal static double Area(OutPt pts)
         {
-            p1 = null; p2 = null;
-            OutRec outRec1 = m_PolyOuts[j.poly1Idx];
-            OutRec outRec2 = m_PolyOuts[j.poly2Idx];
-            if (outRec1  == null || outRec2 == null)  return false;  
-            OutPt pp1a = outRec1.pts;
-            OutPt pp2a = outRec2.pts;
-            IntPoint pt1 = j.pt2a, pt2 = j.pt2b;
-            IntPoint pt3 = j.pt1a, pt4 = j.pt1b;
-            if (!FindSegment(ref pp1a, m_UseFullRange, ref pt1, ref pt2)) return false;
-            if (outRec1 == outRec2)
+            double result = 0.0;
+            if (pts.next == pts.prev) return 0.0;
+            OutPt p = pts;
+            do
             {
-              //we're searching the same polygon for overlapping segments so
-              //segment 2 mustn't be the same as segment 1 ...
-              pp2a = pp1a.next;
-              if (!FindSegment(ref pp2a, m_UseFullRange, ref pt3, ref pt4) || (pp2a == pp1a)) 
-                  return false;
+                result += (double)p.pt.X * p.next.pt.Y - (double)p.next.pt.X * p.pt.Y;
+                p = p.next;
             }
-            else if (!FindSegment(ref pp2a, m_UseFullRange, ref pt3, ref pt4)) return false;
+            while (p != pts);
+            return result / 2;
+        }
+        //------------------------------------------------------------------------------
 
-            if (!GetOverlapSegment(pt1, pt2, pt3, pt4, ref pt1, ref pt2)) return false;
+        private void JoinCommonEdges()
+        {
+          for (int i = 0; i < m_Joins.Count; i++)
+          {
+            JoinRec j = m_Joins[i];
+            OutRec outRec1 = m_PolyOuts[j.poly1Idx];
+            OutPt pp1a = outRec1.pts;
+            OutRec outRec2 = m_PolyOuts[j.poly2Idx];
+            OutPt pp2a = outRec2.pts;
+            IntPoint pt1 = new IntPoint(j.pt2a);
+            IntPoint pt2 = new IntPoint(j.pt2b);
+            IntPoint pt3 = new IntPoint(j.pt1a);
+            IntPoint pt4 = new IntPoint(j.pt1b);
+            if (!FindSegment(ref pp1a, ref pt1, ref pt2)) continue;
+            if (j.poly1Idx == j.poly2Idx)
+            {
+                //we're searching the same polygon for overlapping segments so
+                //segment 2 mustn't be the same as segment 1 ...
+                pp2a = pp1a.next;
+                if (!FindSegment(ref pp2a, ref pt3, ref pt4) || (pp2a == pp1a)) continue;
+            }
+            else if (!FindSegment(ref pp2a, ref pt3, ref pt4)) continue;
 
-            OutPt p3, p4, prev = pp1a.prev;
+            if (!GetOverlapSegment(pt1, pt2, pt3, pt4, ref pt1, ref pt2)) continue;
+
+            OutPt p1, p2, p3, p4;
+            OutPt prev = pp1a.prev;
             //get p1 & p2 polypts - the overlap start & endpoints on poly1
+            
             if (PointsEqual(pp1a.pt, pt1)) p1 = pp1a;
             else if (PointsEqual(prev.pt, pt1)) p1 = prev;
             else p1 = InsertPolyPtBetween(pp1a, prev, pt1);
@@ -3002,10 +2886,11 @@ namespace ClipperLib
             if (PointsEqual(pp1a.pt, pt2)) p2 = pp1a;
             else if (PointsEqual(prev.pt, pt2)) p2 = prev;
             else if ((p1 == pp1a) || (p1 == prev))
-              p2 = InsertPolyPtBetween(pp1a, prev, pt2);
+                p2 = InsertPolyPtBetween(pp1a, prev, pt2);
             else if (Pt3IsBetweenPt1AndPt2(pp1a.pt, p1.pt, pt2))
-              p2 = InsertPolyPtBetween(pp1a, p1, pt2); else
-              p2 = InsertPolyPtBetween(p1, prev, pt2);
+                p2 = InsertPolyPtBetween(pp1a, p1, pt2); 
+            else
+                p2 = InsertPolyPtBetween(p1, prev, pt2);
 
             //get p3 & p4 polypts - the overlap start & endpoints on poly2
             prev = pp2a.prev;
@@ -3016,315 +2901,149 @@ namespace ClipperLib
             if (PointsEqual(pp2a.pt, pt2)) p4 = pp2a;
             else if (PointsEqual(prev.pt, pt2)) p4 = prev;
             else if ((p3 == pp2a) || (p3 == prev))
-              p4 = InsertPolyPtBetween(pp2a, prev, pt2);
+                p4 = InsertPolyPtBetween(pp2a, prev, pt2);
             else if (Pt3IsBetweenPt1AndPt2(pp2a.pt, p3.pt, pt2))
-              p4 = InsertPolyPtBetween(pp2a, p3, pt2); else
-              p4 = InsertPolyPtBetween(p3, prev, pt2);
+                p4 = InsertPolyPtBetween(pp2a, p3, pt2);
+            else
+                p4 = InsertPolyPtBetween(p3, prev, pt2);
 
-            //p1.pt == p3.pt and p2.pt == p4.pt so join p1 to p3 and p2 to p4 ...
+            //p1.pt should equal p3.pt and p2.pt should equal p4.pt here, so ...
+            //join p1 to p3 and p2 to p4 ...
             if (p1.next == p2 && p3.prev == p4)
             {
-              p1.next = p3;
-              p3.prev = p1;
-              p2.prev = p4;
-              p4.next = p2;
-              return true;
+                p1.next = p3;
+                p3.prev = p1;
+                p2.prev = p4;
+                p4.next = p2;
             }
             else if (p1.prev == p2 && p3.next == p4)
             {
-              p1.prev = p3;
-              p3.next = p1;
-              p2.next = p4;
-              p4.prev = p2;
-              return true;
+                p1.prev = p3;
+                p3.next = p1;
+                p2.next = p4;
+                p4.prev = p2;
             }
             else
-              return false; //an orientation is probably wrong
-        }
-        //----------------------------------------------------------------------
+                continue; //an orientation is probably wrong
 
-        private void FixupJoinRecs(JoinRec j, OutPt pt, int startIdx)
-        {
-          for (int k = startIdx; k < m_Joins.Count; k++)
-            {
-              JoinRec j2 = m_Joins[k];
-              if (j2.poly1Idx == j.poly1Idx && PointIsVertex(j2.pt1a, pt))
-                j2.poly1Idx = j.poly2Idx;
-              if (j2.poly2Idx == j.poly1Idx && PointIsVertex(j2.pt2a, pt))
-                j2.poly2Idx = j.poly2Idx;
-            }
-        }
-        //----------------------------------------------------------------------
-
-        private bool Poly2ContainsPoly1(OutPt outPt1, OutPt outPt2, bool UseFullInt64Range)
-        {
-            //find the first pt in outPt1 that isn't also a vertex of outPt2 ...
-            OutPt outPt = outPt1;
-            do
-            {
-                if (!PointIsVertex(outPt.pt, outPt2)) break;
-                outPt = outPt.next;
-            }
-            while (outPt != outPt1);
-            bool result;
-            //sometimes a point on one polygon can be touching the other polygon 
-            //so to be totally confident outPt1 is inside outPt2 repeat ...
-            do
-            {
-                result = PointInPolygon(outPt.pt, outPt2, UseFullInt64Range);
-                outPt = outPt.next;
-            }
-            while (result && outPt != outPt1);
-            return result;
-        }
-        //----------------------------------------------------------------------
-
-        private void FixupFirstLefts1(OutRec OldOutRec, OutRec NewOutRec)
-        { 
-            for (int i = 0; i < m_PolyOuts.Count; i++)
-            {
-                OutRec outRec = m_PolyOuts[i];
-                if (outRec.pts != null && outRec.FirstLeft == OldOutRec) 
-                {
-                    if (Poly2ContainsPoly1(outRec.pts, NewOutRec.pts, m_UseFullRange))
-                        outRec.FirstLeft = NewOutRec;
-                }
-            }
-        }
-        //----------------------------------------------------------------------
-
-        private void FixupFirstLefts2(OutRec OldOutRec, OutRec NewOutRec)
-        { 
-            foreach (OutRec outRec in m_PolyOuts)
-                if (outRec.FirstLeft == OldOutRec) outRec.FirstLeft = NewOutRec;
-        }
-        //----------------------------------------------------------------------
-
-        private void JoinCommonEdges()
-        {
-          for (int i = 0; i < m_Joins.Count; i++)
-          {
-            JoinRec j = m_Joins[i];
-
-            OutRec outRec1 = m_PolyOuts[j.poly1Idx];
-            OutRec outRec2 = m_PolyOuts[j.poly2Idx];
-
-            if (outRec1.pts == null || outRec2.pts == null) continue;
-
-            //get the polygon fragment with the correct hole state (FirstLeft)
-            //before calling JoinPoints() ...
-            OutRec holeStateRec;
-            if (outRec1 == outRec2) holeStateRec = outRec1;
-            else if (Param1RightOfParam2(outRec1, outRec2)) holeStateRec = outRec2;
-            else if (Param1RightOfParam2(outRec2, outRec1)) holeStateRec = outRec1;
-            else holeStateRec = GetLowermostRec(outRec1, outRec2);
-
-            OutPt p1, p2;
-            if (!JoinPoints(j, out p1, out p2)) continue;
-
-            if (outRec1 == outRec2)
+            if (j.poly2Idx == j.poly1Idx)
             {
                 //instead of joining two polygons, we've just created a new one by
                 //splitting one polygon into two.
-                outRec1.pts = GetBottomPt(p1);
-                outRec1.bottomPt = outRec1.pts;
+                //However, make sure the larger polygon is attached
+                //to outRec1 in case it also owns some holes ...
+                if (Math.Abs(Area(p1)) >= Math.Abs(Area(p2)))
+                {
+                    outRec1.pts = PolygonBottom(p1);
+                    outRec1.bottomPt = outRec1.pts;
+                    outRec2 = CreateOutRec();
+                    m_PolyOuts.Add(outRec2);
+                    outRec2.idx = m_PolyOuts.Count - 1;
+                    j.poly2Idx = outRec2.idx;
+                    outRec2.pts = PolygonBottom(p2);
+                    outRec2.bottomPt = outRec2.pts;
+                }
+                else 
+                {
+                    outRec1.pts = PolygonBottom(p2);
+                    outRec1.bottomPt = outRec1.pts;
+                    outRec2 = CreateOutRec();
+                    m_PolyOuts.Add(outRec2);
+                    outRec2.idx = m_PolyOuts.Count - 1;
+                    j.poly2Idx = outRec2.idx;
+                    outRec2.pts = PolygonBottom(p1);
+                    outRec2.bottomPt = outRec2.pts;
+                }
                 outRec1.bottomPt.idx = outRec1.idx;
-                outRec2 = CreateOutRec();
-                m_PolyOuts.Add(outRec2);
-                outRec2.idx = m_PolyOuts.Count - 1;
-                j.poly2Idx = outRec2.idx;
-                outRec2.pts = GetBottomPt(p2);
-                outRec2.bottomPt = outRec2.pts;
                 outRec2.bottomPt.idx = outRec2.idx;
 
-                if (Poly2ContainsPoly1(outRec2.pts, outRec1.pts, m_UseFullRange))
+                if (PointInPolygon(outRec2.pts.pt, outRec1.pts, m_UseFullRange))
                 {
-                    //outRec2 is contained by outRec1 ...
                     outRec2.isHole = !outRec1.isHole;
                     outRec2.FirstLeft = outRec1;
-
-                    FixupJoinRecs(j, p2, i + 1);
-
-                    //fixup FirstLeft pointers that may need reassigning to OutRec1
-                    if (m_UsingPolyTree) FixupFirstLefts2(outRec2, outRec1);
-
-                    FixupOutPolygon(outRec1); //nb: do this BEFORE testing orientation
-                    FixupOutPolygon(outRec2); //    but AFTER calling FixupJoinRecs()
-
-                    if ((outRec2.isHole ^ m_ReverseOutput) == (Area(outRec2, m_UseFullRange) > 0))
-                        ReversePolyPtLinks(outRec2.pts);
-
+                    if (outRec2.isHole == IsClockwise(outRec2, m_UseFullRange)) 
+                      ReversePolyPtLinks(outRec2.pts);
                 }
-                else if (Poly2ContainsPoly1(outRec1.pts, outRec2.pts, m_UseFullRange))
+                else if (PointInPolygon(outRec1.pts.pt, outRec2.pts, m_UseFullRange))
                 {
-                    //outRec1 is contained by outRec2 ...
                     outRec2.isHole = outRec1.isHole;
                     outRec1.isHole = !outRec2.isHole;
                     outRec2.FirstLeft = outRec1.FirstLeft;
                     outRec1.FirstLeft = outRec2;
-
-                    FixupJoinRecs(j, p2, i + 1);
-                    
-                    //fixup FirstLeft pointers that may need reassigning to OutRec1
-                    if (m_UsingPolyTree) FixupFirstLefts2(outRec1, outRec2);
-
-                    FixupOutPolygon(outRec1); //nb: do this BEFORE testing orientation
-                    FixupOutPolygon(outRec2); //    but AFTER calling FixupJoinRecs()
-
-                    if ((outRec1.isHole ^ m_ReverseOutput) == (Area(outRec1, m_UseFullRange) > 0))
-                        ReversePolyPtLinks(outRec1.pts);
+                    if (outRec1.isHole == IsClockwise(outRec1, m_UseFullRange))
+                      ReversePolyPtLinks(outRec1.pts);
                 }
                 else
                 {
-                    //the 2 polygons are completely separate ...
+                    //I'm assuming that if outRec1 contain any holes, it still does after
+                    //the split and that none are now contained by the new outRec2.
+                    //In a perfect world, I'd PointInPolygon() every hole owned by outRec1
+                    //to make sure it's still owned by outRec1 and not now owned by outRec2.
                     outRec2.isHole = outRec1.isHole;
                     outRec2.FirstLeft = outRec1.FirstLeft;
+                }
 
-                    FixupJoinRecs(j, p2, i + 1);
-
-                    //fixup FirstLeft pointers that may need reassigning to OutRec2
-                    if (m_UsingPolyTree) FixupFirstLefts1(outRec1, outRec2);
-
-                    FixupOutPolygon(outRec1); //nb: do this BEFORE testing orientation
-                    FixupOutPolygon(outRec2); //    but AFTER calling FixupJoinRecs()
+                //now fixup any subsequent m_Joins that match this polygon
+                for (int k = i + 1; k < m_Joins.Count; k++)
+                {
+                    JoinRec j2 = m_Joins[k];
+                    if (j2.poly1Idx == j.poly1Idx && PointIsVertex(j2.pt1a, p2))
+                        j2.poly1Idx = j.poly2Idx;
+                    if (j2.poly2Idx == j.poly1Idx && PointIsVertex(j2.pt2a, p2))
+                        j2.poly2Idx = j.poly2Idx;
                 }
             }
             else
             {
-                //joined 2 polygons together ...
-
-                //cleanup redundant edges ...
-                FixupOutPolygon(outRec1);
-
-                //delete the obsolete pointer ...
-                int OKIdx = outRec1.idx;
-                int ObsoleteIdx = outRec2.idx;
+                //having joined 2 polygons together, delete the obsolete pointer ...
                 outRec2.pts = null;
                 outRec2.bottomPt = null;
-
-                outRec1.isHole = holeStateRec.isHole;
-                if (holeStateRec == outRec2) 
-                  outRec1.FirstLeft = outRec2.FirstLeft;
-                outRec2.FirstLeft = outRec1;
+                outRec2.AppendLink = outRec1;
+                if (outRec1.isHole && !outRec2.isHole) outRec1.isHole = false;
 
                 //now fixup any subsequent joins that match this polygon
                 for (int k = i + 1; k < m_Joins.Count; k++)
                 {
                     JoinRec j2 = m_Joins[k];
-                    if (j2.poly1Idx == ObsoleteIdx) j2.poly1Idx = OKIdx;
-                    if (j2.poly2Idx == ObsoleteIdx) j2.poly2Idx = OKIdx;
+                    if (j2.poly1Idx == j.poly2Idx) j2.poly1Idx = j.poly1Idx;
+                    if (j2.poly2Idx == j.poly2Idx) j2.poly2Idx = j.poly1Idx;
                 }
-
-                //fixup FirstLeft pointers that may need reassigning to OutRec1
-                if (m_UsingPolyTree) FixupFirstLefts2(outRec2, outRec1);
+                j.poly2Idx = j.poly1Idx;
             }
+            //now cleanup redundant edges too ...
+            FixupOutPolygon(outRec1);
+            if (j.poly2Idx != j.poly1Idx) FixupOutPolygon(outRec2);
           }
         }
         //------------------------------------------------------------------------------
 
-        private static bool FullRangeNeeded(Polygon pts)
-        {
-            bool result = false;
-            for (int i = 0; i < pts.Count; i++)
-            {
-                if (Math.Abs(pts[i].X) > hiRange || Math.Abs(pts[i].Y) > hiRange)
-                    throw new ClipperException("Coordinate exceeds range bounds.");
-                else if (Math.Abs(pts[i].X) > loRange || Math.Abs(pts[i].Y) > loRange)
-                    result = true;
-            }
-            return result;
-        }
-        //------------------------------------------------------------------------------
-
-        public static double Area(Polygon poly)
+        public static double Area(Polygon poly, bool UseFullInt64Range = true)
         {
             int highI = poly.Count - 1;
             if (highI < 2) return 0;
-            if (FullRangeNeeded(poly))
+            if (UseFullInt64Range)
             {
                 Int128 a = new Int128(0);
-                a = Int128.Int128Mul(poly[highI].X + poly[0].X, poly[0].Y - poly[highI].Y);
-                for (int i = 1; i <= highI; ++i)
-                    a += Int128.Int128Mul(poly[i - 1].X + poly[i].X, poly[i].Y - poly[i - 1].Y);
+                a = Int128.Int128Mul(poly[highI].X, poly[0].Y) -
+                    Int128.Int128Mul(poly[0].X, poly[highI].Y);
+                for (int i = 0; i < highI; ++i)
+                    a += Int128.Int128Mul(poly[i].X, poly[i + 1].Y) -
+                    Int128.Int128Mul(poly[i + 1].X, poly[i].Y);
                 return a.ToDouble() / 2;
             }
             else
             {
-                double area = ((double)poly[highI].X + poly[0].X) * ((double)poly[0].Y - poly[highI].Y);
-                for (int i = 1; i <= highI; ++i)
-                    area += ((double)poly[i - 1].X + poly[i].X) * ((double)poly[i].Y - poly[i -1].Y);
+                double area = (double)poly[highI].X * (double)poly[0].Y -
+                    (double)poly[0].X * (double)poly[highI].Y;
+                for (int i = 0; i < highI; ++i)
+                    area += (double)poly[i].X * (double)poly[i + 1].Y -
+                        (double)poly[i + 1].X * (double)poly[i].Y;
                 return area / 2;
             }
-        }
-        //------------------------------------------------------------------------------
-
-        double Area(OutRec outRec, bool UseFull64BitRange)
-        {
-          OutPt op = outRec.pts;
-          if (op == null) return 0;
-          if (UseFull64BitRange) 
-          {
-            Int128 a = new Int128(0);
-            do
-            {
-                a += Int128.Int128Mul(op.pt.X + op.prev.pt.X, op.prev.pt.Y - op.pt.Y);
-                op = op.next;
-            } while (op != outRec.pts);
-            return a.ToDouble() / 2;          
-          }
-          else
-          {
-            double a = 0;
-            do {
-                a = a + (op.pt.X + op.prev.pt.X) * (op.prev.pt.Y - op.pt.Y);
-              op = op.next;
-            } while (op != outRec.pts);
-            return a/2;
-          }
         }
 
         //------------------------------------------------------------------------------
         // OffsetPolygon functions ...
-        //------------------------------------------------------------------------------
-
-        internal static Polygon BuildArc(IntPoint pt, double a1, double a2, double r, double limit)
-        {
-            //see notes in clipper.pas regarding steps
-            double arcFrac = Math.Abs(a2 - a1) / (2 * Math.PI);
-            int steps = (int)(arcFrac * Math.PI / Math.Acos(1 - limit / Math.Abs(r)));
-            if (steps < 2) 
-                steps = 2;
-            else if (steps > (int)(222.0 * arcFrac)) 
-                steps = (int)(222.0 * arcFrac);
-
-            double x = Math.Cos(a1); 
-            double y = Math.Sin(a1);
-            double c = Math.Cos((a2 - a1) / steps);
-            double s = Math.Sin((a2 - a1) / steps);
-            Polygon result = new Polygon(steps +1);
-            for (int i = 0; i <= steps; ++i)
-            {
-                result.Add(new IntPoint(pt.X + Round(x * r), pt.Y + Round(y * r)));
-                double x2 = x;
-                x = x * c - s * y;  //cross product
-                y = x2 * s + y * c; //dot product
-            }
-            return result;
-        }
-        //------------------------------------------------------------------------------
-
-        internal static DoublePoint GetUnitNormal(IntPoint pt1, IntPoint pt2)
-        {
-            double dx = (pt2.X - pt1.X);
-            double dy = (pt2.Y - pt1.Y);
-            if ((dx == 0) && (dy == 0)) return new DoublePoint();
-
-            double f = 1 * 1.0 / Math.Sqrt(dx * dx + dy * dy);
-            dx *= f;
-            dy *= f;
-
-            return new DoublePoint(dy, -dx);
-        }
         //------------------------------------------------------------------------------
 
         internal class DoublePoint
@@ -3338,406 +3057,141 @@ namespace ClipperLib
         };
         //------------------------------------------------------------------------------
 
-        private class PolyOffsetBuilder
+
+        internal static Polygon BuildArc(IntPoint pt, double a1, double a2, double r)
         {
-            private Polygons pts; 
-            private Polygon currentPoly;
-            private List<DoublePoint> normals;
-            private double delta, m_R;
-            private int m_i, m_j, m_k;
-            private const int buffLength = 128;
+          int steps = Math.Max(6, (int)(Math.Sqrt(Math.Abs(r)) * Math.Abs(a2 - a1)));
+          Polygon result = new Polygon(steps);
+          int n = steps - 1;
+          double da = (a2 - a1) / n;
+          double a = a1;
+          for (int i = 0; i < steps; ++i)
+          {
+              result.Add(new IntPoint(pt.X + Round(Math.Cos(a) * r), pt.Y + Round(Math.Sin(a) * r)));
+            a += da;
+          }
+          return result;
+        }
+        //------------------------------------------------------------------------------
 
-            public PolyOffsetBuilder(Polygons pts, Polygons solution, double delta, 
-                JoinType jointype, double limit = 0, bool AutoFix = true)
+        internal static DoublePoint GetUnitNormal(IntPoint pt1, IntPoint pt2)
+        {
+          double dx = ( pt2.X - pt1.X );
+          double dy = ( pt2.Y - pt1.Y );
+          if(  ( dx == 0 ) && ( dy == 0 ) ) return new DoublePoint();
+
+          double f = 1 *1.0/ Math.Sqrt( dx*dx + dy*dy );
+          dx *= f;
+          dy *= f;
+          return new DoublePoint(dy, -dx);
+        }
+        //------------------------------------------------------------------------------
+
+        public static Polygons OffsetPolygons(Polygons pts, double delta)
+        {
+          if (delta == 0) return pts;
+          double deltaSq = delta*delta;
+          Polygons result = new Polygons(pts.Count);
+
+          for (int j = 0; j < pts.Count; ++j)
+          {
+            int highI = pts[j].Count -1;
+            //to minimize artefacts, strip out those polygons where
+            //it's shrinking and where its area < Sqr(delta) ...
+            double a1 = Area(pts[j], true);
+            if (delta < 0) { if (a1 > 0 && a1 < deltaSq) highI = 0;}
+            else if (a1 < 0 && -a1 < deltaSq) highI = 0; //nb: a hole if area < 0
+
+            if (highI < 2 && delta <= 0) continue;
+            if (highI == 0)
             {
-                //precondtion: solution != pts
+                Polygon arc = BuildArc(pts[j][highI], 0, 2 * Math.PI, delta);
+                result.Add(arc);
+                continue;
+            }
 
-                if (delta == 0)
-                {
-                    solution = pts;
-                    return;
-                }
+            Polygon pg = new Polygon(highI * 2 + 2);
 
-                this.pts = pts;
-                this.delta = delta;
+            List<DoublePoint> normals = new List<DoublePoint>(highI+1);
+            normals.Add(GetUnitNormal(pts[j][highI], pts[j][0]));
+            for (int i = 1; i <= highI; ++i)
+              normals.Add(GetUnitNormal(pts[j][i-1], pts[j][i]));
 
-                //AutoFix - fixes polygon orientation if necessary and removes 
-                //duplicate vertices. Can be set false when you're sure that polygon
-                //orientation is correct and that there are no duplicate vertices.
-                if (AutoFix)
-                {
-                    int Len = pts.Count, botI = 0;
-                    while (botI < Len && pts[botI].Count == 0) botI++;
-                    if (botI == Len) return;
+            for (int i = 0; i < highI; ++i)
+            {
+              pg.Add(new IntPoint(Round(pts[j][i].X + delta *normals[i].X),
+                Round(pts[j][i].Y + delta *normals[i].Y)));
+              pg.Add(new IntPoint(Round(pts[j][i].X + delta * normals[i + 1].X),
+                Round(pts[j][i].Y + delta *normals[i+1].Y)));
+            }
+            pg.Add(new IntPoint(Round(pts[j][highI].X + delta * normals[highI].X),
+              Round(pts[j][highI].Y + delta *normals[highI].Y)));
+            pg.Add(new IntPoint(Round(pts[j][highI].X + delta * normals[0].X),
+              Round(pts[j][highI].Y + delta *normals[0].Y)));
 
-                    //botPt: used to find the lowermost (in inverted Y-axis) & leftmost point
-                    //This point (on pts[botI]) must be on an outer polygon ring and if 
-                    //its orientation is false (counterclockwise) then assume all polygons 
-                    //need reversing ...
-                    IntPoint botPt = pts[botI][0];
-                    for (int i = botI; i < Len; ++i)
-                    {
-                        if (pts[i].Count == 0) continue;
-                        if (UpdateBotPt(pts[i][0], ref botPt)) botI = i;
-                        for (int j = pts[i].Count -1; j > 0; j--)
-                        {
-                            if (PointsEqual(pts[i][j], pts[i][j -1]))
-                                pts[i].RemoveAt(j);
-                            else if (UpdateBotPt(pts[i][j], ref botPt))
-                                botI = i;
-                        }
-                    }
-                    if (!Orientation(pts[botI]))
-                        ReversePolygons(pts);
-                }
+            //round off reflex angles (ie > 180 deg) unless it's almost flat (ie < 10deg angle) ...
+            //cross product normals < 0 . reflex angle; dot product normals == 1 . no angle
+            if ((normals[highI].X *normals[0].Y - normals[0].X *normals[highI].Y) *delta >= 0 &&
+            (normals[0].X *normals[highI].X + normals[0].Y *normals[highI].Y) < 0.985)
+            {
+              double at1 = Math.Atan2(normals[highI].Y, normals[highI].X);
+              double at2 = Math.Atan2(normals[0].Y, normals[0].X);
+              if (delta > 0 && at2 < at1) at2 = at2 + Math.PI*2;
+              else if (delta < 0 && at2 > at1) at2 = at2 - Math.PI*2;
+              Polygon arc = BuildArc(pts[j][highI], at1, at2, delta);
+              pg.InsertRange(highI * 2 + 1, arc);
+            }
+            for (int i = highI; i > 0; --i)
+              if ((normals[i-1].X*normals[i].Y - normals[i].X*normals[i-1].Y) *delta >= 0 &&
+              (normals[i].X*normals[i-1].X + normals[i].Y*normals[i-1].Y) < 0.985)
+              {
+                double at1 = Math.Atan2(normals[i-1].Y, normals[i-1].X);
+                double at2 = Math.Atan2(normals[i].Y, normals[i].X);
+                if (delta > 0 && at2 < at1) at2 = at2 + Math.PI*2;
+                else if (delta < 0 && at2 > at1) at2 = at2 - Math.PI*2;
+                Polygon arc = BuildArc(pts[j][i-1], at1, at2, delta);
+                pg.InsertRange((i - 1) * 2 + 1, arc);
+              }
+            result.Add(pg);
+          }
 
-                switch (jointype)
-                {
-                    case JoinType.jtRound: 
-                        if (limit <= 0) limit = 0.25; 
-                        else if (limit > Math.Abs(delta)) limit = Math.Abs(delta);
-                        break;
-                    case JoinType.jtMiter: 
-                        if (limit < 2) limit = 2; 
-                        break;
-                    default:               
-                        limit = 1; 
-                        break; 
-                }
-
-                double RMin = 2.0 / (limit * limit);
-
-                normals = new List<DoublePoint>();
-
-                double deltaSq = delta*delta;
-                solution.Clear();
-                solution.Capacity = pts.Count;
-                for (m_i = 0; m_i < pts.Count; m_i++)
-                {
-                    int len = pts[m_i].Count;
-                    if (len > 1 && pts[m_i][0].X == pts[m_i][len - 1].X &&
-                        pts[m_i][0].Y == pts[m_i][len - 1].Y) len--;
-
-                    if (len == 0 || (len < 3 && delta <= 0)) 
-                        continue;
-                    else if (len == 1)
-                    {
-                        Polygon arc;
-                        arc = BuildArc(pts[m_i][len - 1], 0, 2 * Math.PI, delta, limit);
-                        solution.Add(arc);
-                        continue;
-                    }
-
-                    //build normals ...
-                    normals.Clear();
-                    normals.Capacity = len;
-                    for (int j = 0; j < len -1; ++j)
-                        normals.Add(GetUnitNormal(pts[m_i][j], pts[m_i][j+1]));
-                    normals.Add(GetUnitNormal(pts[m_i][len - 1], pts[m_i][0]));
-
-                    currentPoly = new Polygon();
-                    m_k = len - 1;
-                    for (m_j = 0; m_j < len; ++m_j)
-                    {
-                        switch (jointype)
-                        {
-                            case JoinType.jtMiter:
-                                m_R = 1 + (normals[m_j].X*normals[m_k].X + 
-                                    normals[m_j].Y*normals[m_k].Y);
-                                if (m_R >= RMin) DoMiter(); else DoSquare(limit);
-                                break;
-                            case JoinType.jtRound: 
-                                DoRound(limit);
-                                break;
-                            case JoinType.jtSquare:
-                                DoSquare(1);
-                                break;
-                        }
-                        m_k = m_j;
-                    }
-                    solution.Add(currentPoly);
-                }
-
-                //finally, clean up untidy corners ...
-                Clipper clpr = new Clipper();
-                clpr.AddPolygons(solution, PolyType.ptSubject);
-                if (delta > 0)
-                {
-                    clpr.Execute(ClipType.ctUnion, solution, PolyFillType.pftPositive, PolyFillType.pftPositive);
-                }
+          //finally, clean up untidy corners ...
+          Clipper clpr = new Clipper();
+          clpr.AddPolygons(result, PolyType.ptSubject);
+          if (delta > 0){
+            if(!clpr.Execute(ClipType.ctUnion, result, PolyFillType.pftNonZero, PolyFillType.pftNonZero))
+              result.Clear();
+          }
+          else
+          {
+            IntRect r = clpr.GetBounds();
+            Polygon outer = new Polygon(4);
+                outer.Add(new IntPoint(r.left - 10, r.bottom + 10));
+                outer.Add(new IntPoint(r.right + 10, r.bottom + 10));
+                outer.Add(new IntPoint(r.right + 10, r.top - 10));
+                outer.Add(new IntPoint(r.left - 10, r.top - 10));
+                clpr.AddPolygon(outer, PolyType.ptSubject);
+                if (clpr.Execute(ClipType.ctUnion, result, PolyFillType.pftNonZero, PolyFillType.pftNonZero))
+                    result.RemoveAt(0);
                 else
-                {
-                    IntRect r = clpr.GetBounds();
-                    Polygon outer = new Polygon(4);
-
-                    outer.Add(new IntPoint(r.left - 10, r.bottom + 10));
-                    outer.Add(new IntPoint(r.right + 10, r.bottom + 10));
-                    outer.Add(new IntPoint(r.right + 10, r.top - 10));
-                    outer.Add(new IntPoint(r.left - 10, r.top - 10));
-
-                    clpr.AddPolygon(outer, PolyType.ptSubject);
-                    clpr.Execute(ClipType.ctUnion, solution, PolyFillType.pftNegative, PolyFillType.pftNegative);
-                    if (solution.Count > 0)
-                    {
-                        solution.RemoveAt(0);
-                        for (int i = 0; i < solution.Count; i++)
-                            solution[i].Reverse();
-                    }
-                }
-            }
-            //------------------------------------------------------------------------------
-
-            internal bool UpdateBotPt(IntPoint pt, ref IntPoint botPt)
-            {
-                if (pt.Y > botPt.Y || (pt.Y == botPt.Y && pt.X < botPt.X))
-                {
-                    botPt = pt;
-                    return true;
-                }
-                else return false;
-            }
-            //------------------------------------------------------------------------------
-
-            internal void AddPoint(IntPoint pt)
-            {
-                if (currentPoly.Count == currentPoly.Capacity)
-                    currentPoly.Capacity += buffLength;
-                currentPoly.Add(pt);
-            }
-            //------------------------------------------------------------------------------
-
-            internal void DoSquare(double mul)
-            {
-                IntPoint pt1 = new IntPoint((Int64)Round(pts[m_i][m_j].X + normals[m_k].X * delta),
-                    (Int64)Round(pts[m_i][m_j].Y + normals[m_k].Y * delta));
-                IntPoint pt2 = new IntPoint((Int64)Round(pts[m_i][m_j].X + normals[m_j].X * delta),
-                    (Int64)Round(pts[m_i][m_j].Y + normals[m_j].Y * delta));
-                if ((normals[m_k].X * normals[m_j].Y - normals[m_j].X * normals[m_k].Y) * delta >= 0)
-                {
-                    double a1 = Math.Atan2(normals[m_k].Y, normals[m_k].X);
-                    double a2 = Math.Atan2(-normals[m_j].Y, -normals[m_j].X);
-                    a1 = Math.Abs(a2 - a1);
-                    if (a1 > Math.PI) a1 = Math.PI * 2 - a1;
-                    double dx = Math.Tan((Math.PI - a1) / 4) * Math.Abs(delta * mul);
-                    pt1 = new IntPoint((Int64)(pt1.X - normals[m_k].Y * dx),
-                        (Int64)(pt1.Y + normals[m_k].X * dx));
-                    AddPoint(pt1);
-                    pt2 = new IntPoint((Int64)(pt2.X + normals[m_j].Y * dx),
-                        (Int64)(pt2.Y - normals[m_j].X * dx));
-                    AddPoint(pt2);
-                }
-                else
-                {
-                    AddPoint(pt1);
-                    AddPoint(pts[m_i][m_j]);
-                    AddPoint(pt2);
-                }
-            }
-            //------------------------------------------------------------------------------
-
-            internal void DoMiter()
-            {
-                if ((normals[m_k].X * normals[m_j].Y - normals[m_j].X * normals[m_k].Y) * delta >= 0)
-                {
-                    double q = delta / m_R;
-                    AddPoint(new IntPoint((Int64)Round(pts[m_i][m_j].X + 
-                        (normals[m_k].X + normals[m_j].X) * q),
-                        (Int64)Round(pts[m_i][m_j].Y + (normals[m_k].Y + normals[m_j].Y) * q)));
-                }
-                else
-                {
-                    IntPoint pt1 = new IntPoint((Int64)Round(pts[m_i][m_j].X + normals[m_k].X * delta),
-                        (Int64)Round(pts[m_i][m_j].Y + normals[m_k].Y * delta));
-                    IntPoint pt2 = new IntPoint((Int64)Round(pts[m_i][m_j].X + normals[m_j].X * delta),
-                        (Int64)Round(pts[m_i][m_j].Y + normals[m_j].Y * delta));
-                    AddPoint(pt1);
-                    AddPoint(pts[m_i][m_j]);
-                    AddPoint(pt2);
-                }
-            }
-            //------------------------------------------------------------------------------
-
-            internal void DoRound(double Limit)
-            {
-                IntPoint pt1 = new IntPoint(Round(pts[m_i][m_j].X + normals[m_k].X * delta),
-                    Round(pts[m_i][m_j].Y + normals[m_k].Y * delta));
-                IntPoint pt2 = new IntPoint(Round(pts[m_i][m_j].X + normals[m_j].X * delta),
-                    Round(pts[m_i][m_j].Y + normals[m_j].Y * delta));
-                AddPoint(pt1);
-                //round off reflex angles (ie > 180 deg) unless almost flat (ie < 10deg).
-                //cross product normals < 0 . angle > 180 deg.
-                //dot product normals == 1 . no angle
-                if ((normals[m_k].X * normals[m_j].Y - normals[m_j].X * normals[m_k].Y) * delta >= 0)
-                {
-                    if ((normals[m_j].X * normals[m_k].X + normals[m_j].Y * normals[m_k].Y) < 0.985)
-                    {
-                        double a1 = Math.Atan2(normals[m_k].Y, normals[m_k].X);
-                        double a2 = Math.Atan2(normals[m_j].Y, normals[m_j].X);
-                        if (delta > 0 && a2 < a1) a2 += Math.PI * 2;
-                        else if (delta < 0 && a2 > a1) a2 -= Math.PI * 2;
-                        Polygon arc = BuildArc(pts[m_i][m_j], a1, a2, delta, Limit);
-                        for (int m = 0; m < arc.Count; m++)
-                            AddPoint(arc[m]);
-                    }
-                }
-                else
-                    AddPoint(pts[m_i][m_j]);
-                AddPoint(pt2);
-            }
-            //------------------------------------------------------------------------------
-
-        } //end PolyOffsetBuilder
-        //------------------------------------------------------------------------------
-
-        public static Polygons OffsetPolygons(Polygons poly, double delta,
-            JoinType jointype, double MiterLimit, bool AutoFix)
-        {
-            Polygons result = new Polygons(poly.Count);
-            new PolyOffsetBuilder(poly, result, delta, jointype, MiterLimit, AutoFix);
-            return result;
-        }
-        //------------------------------------------------------------------------------
-
-        public static Polygons OffsetPolygons(Polygons poly, double delta,
-            JoinType jointype, double MiterLimit)
-        {
-            Polygons result = new Polygons(poly.Count);
-            new PolyOffsetBuilder(poly, result, delta, jointype, MiterLimit, true);
-            return result;
-        }
-        //------------------------------------------------------------------------------
-
-        public static Polygons OffsetPolygons(Polygons poly, double delta, JoinType jointype)
-        {
-            Polygons result = new Polygons(poly.Count);
-            new PolyOffsetBuilder(poly, result, delta, jointype, 0, true);
-            return result;
-        }
-        //------------------------------------------------------------------------------
-
-        public static Polygons OffsetPolygons(Polygons poly, double delta)
-        {
-            Polygons result = new Polygons(poly.Count);
-            new PolyOffsetBuilder(poly, result, delta, JoinType.jtSquare, 2.0, true);
-            return result;
-        }
-
-        //------------------------------------------------------------------------------
-        // SimplifyPolygon functions ...
-        // Convert self-intersecting polygons into simple polygons
-        //------------------------------------------------------------------------------
-
-        public static Polygons SimplifyPolygon(Polygon poly, 
-              PolyFillType fillType = PolyFillType.pftEvenOdd)
-        {
-            Polygons result = new Polygons();
-            Clipper c = new Clipper();
-            c.AddPolygon(poly, PolyType.ptSubject);
-            c.Execute(ClipType.ctUnion, result, fillType, fillType);
-            return result;
-        }
-        //------------------------------------------------------------------------------
-
-        public static Polygons SimplifyPolygons(Polygons polys,
-            PolyFillType fillType = PolyFillType.pftEvenOdd)
-        {
-            Polygons result = new Polygons();
-            Clipper c = new Clipper();
-            c.AddPolygons(polys, PolyType.ptSubject);
-            c.Execute(ClipType.ctUnion, result, fillType, fillType);
-            return result;
-        }
-        //------------------------------------------------------------------------------
-
-        private static bool PointsAreClose(IntPoint pt1, IntPoint pt2, Int64 distSqrd)
-        {
-            Int64 dx = pt1.X - pt2.X;
-            Int64 dy = pt1.Y - pt2.Y;
-            return ((dx * dx) + (dy * dy) <= distSqrd);
-        }
-        //------------------------------------------------------------------------------
-
-        public static Polygon CleanPolygon(Polygon poly,
-            double distance = 1.415)
-        {
-            //distance = proximity in units/pixels below which vertices
-            //will be stripped. Default ~= sqrt(2) so when adjacent
-            //vertices have both x & y coords within 1 unit, then
-            //the second vertex will be stripped.
-
-            Int64 d = (int)(distance * distance);
-            int highI = poly.Count -1;
-            while (highI > 0 && PointsAreClose(poly[highI], poly[0], d)) highI--;
-            Polygon result = new Polygon(highI + 1);
-            if (highI < 2) return result;
-            bool UseFullRange = FullRangeNeeded(poly);
-            IntPoint pt = poly[highI];
-            int i = 0;
-            for (;;)
-            {
-                if (i >= highI) break;
-                int j = i + 1;
-
-                if (PointsAreClose(pt, poly[j], d))
-                {
-                    i = j + 1;
-                    while (i <= highI && PointsAreClose(pt, poly[i], d)) i++;
-                    continue;
-                }
-
-                if (PointsAreClose(poly[i], poly[j], d) ||
-                    ClipperBase.SlopesEqual(pt, poly[i], poly[j], UseFullRange)) 
-                {
-                    i = j;
-                    continue;
-                }
-
-                pt = poly[i++];
-                result.Add(pt);
-            }
-
-            if (i <= highI) result.Add(poly[i]);
-            i = result.Count -1;
-            if (i > 1 && ClipperBase.SlopesEqual(result[i -1], result[i], result[0], UseFullRange)) 
-                result.RemoveAt(i);
-            if (result.Count < 3) result.Clear();
-            return result;
-        }
-        //------------------------------------------------------------------------------
-
-        public static Polygons CleanPolygons(Polygons polys,
-            double distance = 1.415)
-        {
-            Polygons result = new Polygons(polys.Count);
-            for (int i = 0; i < polys.Count; i++)
-                result.Add(CleanPolygon(polys[i], distance));
-            return result;
-        }
-        //------------------------------------------------------------------------------
-
-        public static void PolyTreeToPolygons(PolyTree polytree, Polygons polygons)
-        {
-            polygons.Clear();
-            polygons.Capacity = polytree.Total;
-            AddPolyNodeToPolygons(polytree, polygons);
-        }
-        //------------------------------------------------------------------------------
-
-        public static void AddPolyNodeToPolygons(PolyNode polynode, Polygons polygons)
-        {
-            if (polynode.Contour.Count > 0) 
-                polygons.Add(polynode.Contour);
-            foreach (PolyNode pn in polynode.Childs)
-                AddPolyNodeToPolygons(pn, polygons);
+                    result.Clear();
+          }
+          return result;
         }
         //------------------------------------------------------------------------------
 
 
-    } //end ClipperLib namespace
+    } //clipper namespace
   
     class ClipperException : Exception
     {
-        public ClipperException(string description) : base(description){}
+        private string m_description;
+        public ClipperException(string description)
+        {
+            m_description = description;
+            Console.WriteLine(m_description);
+            throw new Exception(m_description);
+        }
     }
     //------------------------------------------------------------------------------
 }

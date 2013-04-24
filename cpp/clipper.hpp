@@ -1,10 +1,10 @@
 /*******************************************************************************
 *                                                                              *
 * Author    :  Angus Johnson                                                   *
-* Version   :  5.1.4                                                           *
-* Date      :  24 March 2013                                                   *
+* Version   :  4.3.3                                                           *
+* Date      :  5 August 2011                                                   *
 * Website   :  http://www.angusj.com                                           *
-* Copyright :  Angus Johnson 2010-2013                                         *
+* Copyright :  Angus Johnson 2010-2011                                         *
 *                                                                              *
 * License:                                                                     *
 * Use, modification & distribution is subject to Boost Software License Ver 1. *
@@ -21,14 +21,6 @@
 * Springer; 1 edition (January 4, 2005)                                        *
 * http://books.google.com/books?q=vatti+clipping+agoston                       *
 *                                                                              *
-* See also:                                                                    *
-* "Polygon Offsetting by Computing Winding Numbers"                            *
-* Paper no. DETC2005-85513 pp. 565-575                                         *
-* ASME 2005 International Design Engineering Technical Conferences             *
-* and Computers and Information in Engineering Conference (IDETC/CIE2005)      *
-* September 24-28, 2005 , Long Beach, California, USA                          *
-* http://www.me.berkeley.edu/~mcmains/pubs/DAC05OffsetPolygon.pdf              *
-*                                                                              *
 *******************************************************************************/
 
 #ifndef clipper_hpp
@@ -38,90 +30,37 @@
 #include <stdexcept>
 #include <cstring>
 #include <cstdlib>
-#include <ostream>
 
-namespace ClipperLib {
+namespace clipper {
 
 enum ClipType { ctIntersection, ctUnion, ctDifference, ctXor };
 enum PolyType { ptSubject, ptClip };
-//By far the most widely used winding rules for polygon filling are
-//EvenOdd & NonZero (GDI, GDI+, XLib, OpenGL, Cairo, AGG, Quartz, SVG, Gr32)
-//Others rules include Positive, Negative and ABS_GTR_EQ_TWO (only in OpenGL)
-//see http://glprogramming.com/red/chapter11.html
-enum PolyFillType { pftEvenOdd, pftNonZero, pftPositive, pftNegative };
+enum PolyFillType { pftEvenOdd, pftNonZero };
 
 typedef signed long long long64;
 typedef unsigned long long ulong64;
 
 struct IntPoint {
-public:
   long64 X;
   long64 Y;
   IntPoint(long64 x = 0, long64 y = 0): X(x), Y(y) {};
-  friend std::ostream& operator <<(std::ostream &s, IntPoint &p);
 };
 
 typedef std::vector< IntPoint > Polygon;
 typedef std::vector< Polygon > Polygons;
 
-
-std::ostream& operator <<(std::ostream &s, Polygon &p);
-std::ostream& operator <<(std::ostream &s, Polygons &p);
-
-class PolyNode;
-typedef std::vector< PolyNode* > PolyNodes;
-
-class PolyNode 
-{ 
-public:
-    PolyNode();
-    Polygon Contour;
-    PolyNodes Childs;
-    PolyNode* Parent;
-    PolyNode* GetNext() const;
-    bool IsHole() const;
-    int ChildCount() const;
-private:
-    PolyNode* GetNextSiblingUp() const;
-    unsigned Index; //node index in Parent.Childs
-    void AddChild(PolyNode& child);
-    friend class Clipper; //to access Index
+struct ExPolygon {
+  Polygon  outer;
+  Polygons holes;
 };
+typedef std::vector< ExPolygon > ExPolygons;
 
-class PolyTree: public PolyNode
-{ 
-public:
-    ~PolyTree(){Clear();};
-    PolyNode* GetFirst() const;
-    void Clear();
-    int Total() const;
-private:
-    PolyNodes AllNodes;
-    friend class Clipper; //to access AllNodes
-};
-        
-enum JoinType { jtSquare, jtRound, jtMiter };
-
-bool Orientation(const Polygon &poly);
-double Area(const Polygon &poly);
-
-void OffsetPolygons(const Polygons &in_polys, Polygons &out_polys,
-  double delta, JoinType jointype = jtSquare, double limit = 0, bool autoFix = true);
-
-void SimplifyPolygon(const Polygon &in_poly, Polygons &out_polys, PolyFillType fillType = pftEvenOdd);
-void SimplifyPolygons(const Polygons &in_polys, Polygons &out_polys, PolyFillType fillType = pftEvenOdd);
-void SimplifyPolygons(Polygons &polys, PolyFillType fillType = pftEvenOdd);
-
-void CleanPolygon(Polygon& in_poly, Polygon& out_poly, double distance = 1.415);
-void CleanPolygons(Polygons& in_polys, Polygons& out_polys, double distance = 1.415);
-
-void PolyTreeToPolygons(PolyTree& polytree, Polygons& polygons);
-
-void ReversePolygon(Polygon& p);
-void ReversePolygons(Polygons& p);
+bool IsClockwise(const Polygon &poly, bool UseFullInt64Range = true);
+double Area(const Polygon &poly, bool UseFullInt64Range = true);
+bool OffsetPolygons(const Polygons &in_pgs, Polygons &out_pgs, const float &delta);
 
 //used internally ...
-enum EdgeSide { esLeft = 1, esRight = 2};
+enum EdgeSide { esLeft, esRight };
 enum IntersectProtects { ipNone = 0, ipLeft = 1, ipRight = 2, ipBoth = 3 };
 
 struct TEdge {
@@ -132,8 +71,7 @@ struct TEdge {
   long64 xtop;
   long64 ytop;
   double dx;
-  long64 deltaX;
-  long64 deltaY;
+  long64 tmpX;
   PolyType polyType;
   EdgeSide side;
   int windDelta; //1 or -1 depending on winding direction
@@ -173,8 +111,8 @@ struct OutPt; //forward declaration
 struct OutRec {
   int     idx;
   bool    isHole;
-  OutRec *FirstLeft;  //see comments in clipper.pas
-  PolyNode *polyNode;
+  OutRec *FirstLeft;
+  OutRec *AppendLink;
   OutPt  *pts;
   OutPt  *bottomPt;
 };
@@ -219,6 +157,8 @@ public:
   bool AddPolygons( const Polygons &ppg, PolyType polyType);
   virtual void Clear();
   IntRect GetBounds();
+  bool UseFullCoordinateRange() {return m_UseFullRange;};
+  void UseFullCoordinateRange(bool newVal);
 protected:
   void DisposeLocalMinimaList();
   TEdge* AddBoundsToLML(TEdge *e);
@@ -241,15 +181,13 @@ public:
     PolyFillType subjFillType = pftEvenOdd,
     PolyFillType clipFillType = pftEvenOdd);
   bool Execute(ClipType clipType,
-    PolyTree &polytree,
+    ExPolygons &solution,
     PolyFillType subjFillType = pftEvenOdd,
     PolyFillType clipFillType = pftEvenOdd);
   void Clear();
-  bool ReverseSolution() {return m_ReverseOutput;};
-  void ReverseSolution(bool value) {m_ReverseOutput = value;};
 protected:
   void Reset();
-  virtual bool ExecuteInternal();
+  virtual bool ExecuteInternal(bool fixHoleLinkages);
 private:
   PolyOutList       m_PolyOuts;
   JoinList          m_Joins;
@@ -258,16 +196,14 @@ private:
   Scanbeam         *m_Scanbeam;
   TEdge           *m_ActiveEdges;
   TEdge           *m_SortedEdges;
-  IntersectNode   *m_IntersectNodes;
-  bool             m_ExecuteLocked;
-  PolyFillType     m_ClipFillType;
-  PolyFillType     m_SubjFillType;
-  bool             m_ReverseOutput;
-  bool             m_UsingPolyTree; 
+  IntersectNode    *m_IntersectNodes;
+  bool              m_ExecuteLocked;
+  PolyFillType      m_ClipFillType;
+  PolyFillType      m_SubjFillType;
   void DisposeScanbeamList();
   void SetWindingCount(TEdge& edge);
-  bool IsEvenOddFillType(const TEdge& edge) const;
-  bool IsEvenOddAltFillType(const TEdge& edge) const;
+  bool IsNonZeroFillType(const TEdge& edge) const;
+  bool IsNonZeroAltFillType(const TEdge& edge) const;
   void InsertScanbeam(const long64 Y);
   long64 PopScanbeam();
   void InsertLocalMinimaIntoAEL(const long64 botY);
@@ -291,33 +227,28 @@ private:
   void DoEdge2(TEdge *edge1, TEdge *edge2, const IntPoint &pt);
   void DoBothEdges(TEdge *edge1, TEdge *edge2, const IntPoint &pt);
   void IntersectEdges(TEdge *e1, TEdge *e2,
-    const IntPoint &pt, const IntersectProtects protects);
-  OutRec* CreateOutRec();
+    const IntPoint &pt, IntersectProtects protects);
   void AddOutPt(TEdge *e, const IntPoint &pt);
   void DisposeAllPolyPts();
-  void DisposeOutRec(PolyOutList::size_type index);
-  bool ProcessIntersections(const long64 botY, const long64 topY);
+  void DisposeOutRec(int index, bool ignorePts = false);
+  bool ProcessIntersections( const long64 topY);
   void AddIntersectNode(TEdge *e1, TEdge *e2, const IntPoint &pt);
-  void BuildIntersectList(const long64 botY, const long64 topY);
+  void BuildIntersectList(const long64 topY);
   void ProcessIntersectList();
   void ProcessEdgesAtTopOfScanbeam(const long64 topY);
   void BuildResult(Polygons& polys);
-  void BuildResult2(PolyTree& polytree);
+  void BuildResultEx(ExPolygons& polys);
   void SetHoleState(TEdge *e, OutRec *OutRec);
   void DisposeIntersectNodes();
-  bool FixupIntersectionOrder();
+  bool FixupIntersections();
   void FixupOutPolygon(OutRec &outRec);
   bool IsHole(TEdge *e);
-  void FixHoleLinkage(OutRec &outRec);
+  void FixHoleLinkage(OutRec *outRec);
   void AddJoin(TEdge *e1, TEdge *e2, int e1OutIdx = -1, int e2OutIdx = -1);
   void ClearJoins();
   void AddHorzJoin(TEdge *e, int idx);
   void ClearHorzJoins();
-  bool JoinPoints(const JoinRec *j, OutPt *&p1, OutPt *&p2);
-  void FixupJoinRecs(JoinRec *j, OutPt *pt, unsigned startIdx);
   void JoinCommonEdges();
-  void FixupFirstLefts1(OutRec* OldOutRec, OutRec* NewOutRec);
-  void FixupFirstLefts2(OutRec* OldOutRec, OutRec* NewOutRec);
 };
 
 //------------------------------------------------------------------------------
@@ -326,16 +257,17 @@ private:
 class clipperException : public std::exception
 {
   public:
-    clipperException(const char* description): m_descr(description) {}
+    clipperException(const char* description)
+      throw(): std::exception(), m_description (description) {}
     virtual ~clipperException() throw() {}
-    virtual const char* what() const throw() {return m_descr.c_str();}
+    virtual const char* what() const throw() {return m_description.c_str();}
   private:
-    std::string m_descr;
+    std::string m_description;
 };
 //------------------------------------------------------------------------------
+//------------------------------------------------------------------------------
 
-} //ClipperLib namespace
-
+} //clipper namespace
 #endif //clipper_hpp
 
 
