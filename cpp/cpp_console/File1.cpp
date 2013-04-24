@@ -1,212 +1,138 @@
 //---------------------------------------------------------------------------
 
+#pragma hdrstop
+
 #include <cmath>
-#include <ctime>
-#include <cstdlib>
-#include <cstdio>
+#include <stdlib>
 #include <vector>
-#include <iomanip>
 #include <iostream>
 #include <fstream>
-#include <sstream>
 #include <string>
+#include <stdio.h>
 #include "clipper.hpp"
+#include <windows.h>
 
 //---------------------------------------------------------------------------
 
+using namespace clipper;
 using namespace std;
-using namespace ClipperLib;
 
-static string ColorToHtml(unsigned clr)
+void PolygonsToSVG(char * filename,
+  Polygons *subj, Polygons *clip, Polygons *solution,
+  PolyFillType subjFill = pftNonZero, PolyFillType clipFill = pftNonZero,
+  double scale = 1, int margin = 10)
 {
-  stringstream ss;
-  ss << '#' << hex << std::setfill('0') << setw(6) << (clr & 0xFFFFFF);
-  return ss.str();
-}
-//------------------------------------------------------------------------------
+  Polygons* polys [] = {subj, clip, solution};
+  //calculate the bounding rect ...
+  IntRect rec;
+  bool firstPending = true;
+  for (int k = 0; k < 3; ++k)
+    if (polys[k])
+      for (Polygons::size_type i = 0; i < (*polys[k]).size(); ++i)
+        for (clipper::Polygon::size_type j = 0; j < (*polys[k])[i].size(); ++j)
+        {
+          if (firstPending || (*polys[k])[i][j].X < rec.left)
+            rec.left = (*polys[k])[i][j].X;
+          if (firstPending || (*polys[k])[i][j].X > rec.right)
+            rec.right = (*polys[k])[i][j].X;
+          if (firstPending || (*polys[k])[i][j].Y < rec.top)
+            rec.top = (*polys[k])[i][j].Y;
+          if (firstPending || (*polys[k])[i][j].Y > rec.bottom)
+            rec.bottom = (*polys[k])[i][j].Y;
+          firstPending = false;
+        }
 
-static float GetAlphaAsFrac(unsigned clr)
-{
-  return ((float)(clr >> 24) / 255);
-}
-//------------------------------------------------------------------------------
+  if (scale == 0) scale = 1;
+  rec.left *= scale;
+  rec.top *= scale;
+  rec.right *= scale;
+  rec.bottom *= scale;
 
-//a simple class that builds an SVG file with any number of polygons
-class SVGBuilder
-{
+  long64 offsetX = -rec.left + margin;
+  long64 offsetY = -rec.top + margin;
 
-  class StyleInfo
+  const std::string svg_xml_start [] =
+    {"<?xml version=\"1.0\" standalone=\"no\"?>\n"
+     "<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\"\n"
+     "\"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\">\n\n"
+     "<svg width=\"",
+     "\" height=\"",
+     "\" viewBox=\"0 0 ",
+     "\" version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\">\n\n"
+    };
+  const std::string poly_start =
+    " <path d=\"\n";
+  const std::string poly_end [] =
+    {"\"\n style=\"fill:",
+     "; fill-opacity:",
+     "; fill-rule:",
+     ";\n stroke:",
+     "; stroke-opacity:",
+     "; stroke-width:",
+     ";\"/>\n\n"
+    };
+  const std::string svg_xml_end = "</svg>\n";
+
+  ofstream file;
+  file.open(filename);
+  if (!file.is_open()) return;
+  file.setf(ios::fixed);
+  file.precision(0);
+  file << svg_xml_start[0] <<
+    (rec.right - rec.left)*scale + margin*2 << "px" << svg_xml_start[1] <<
+    (rec.bottom - rec.top)*scale + margin*2 << "px" << svg_xml_start[2] <<
+    (rec.right - rec.left)*scale + margin*2 << " " <<
+    (rec.bottom - rec.top)*scale + margin*2 << svg_xml_start[3];
+  setlocale(LC_NUMERIC, "C");
+  file.precision(2);
+  for (int k = 0; k < 3; k++)
   {
-  public:
-  PolyFillType pft;
-  unsigned brushClr;
-  unsigned penClr;
-  double penWidth;
-  bool showCoords;
-
-  StyleInfo()
-  {
-    pft = pftNonZero;
-    brushClr = 0xFFFFFFCC;
-    penClr = 0xFF000000;
-    penWidth = 0.8;
-    showCoords = false;
-  }
-  };
-
-  class PolyInfo
-  {
-    public:
-      Polygons polygons;
-    StyleInfo si;
-
-      PolyInfo(Polygons polygons, StyleInfo style)
-      {
-          this->polygons = polygons;
-          this->si = style;
-      }
-  };
-
-  typedef std::vector<PolyInfo> PolyInfoList;
-
-private:
-  PolyInfoList polyInfos;
-  static const std::string svg_xml_start[];
-  static const std::string poly_end[];
-
-public:
-  StyleInfo style;
-
-  void AddPolygons(Polygons& poly)
-  {
-    if (poly.size() == 0) return;
-    polyInfos.push_back(PolyInfo(poly, style));
-  }
-
-  bool SaveToFile(char * filename, double scale = 1.0, int margin = 10)
-  {
-    //calculate the bounding rect ...
-    PolyInfoList::size_type i = 0;
-    Polygons::size_type j;
-    while (i < polyInfos.size())
+    if (!polys[k]) continue;
+    file << poly_start;
+    for (clipper::Polygons::size_type i = 0; i < (*polys[k]).size(); i++)
     {
-      j = 0;
-      while (j < polyInfos[i].polygons.size() &&
-        polyInfos[i].polygons[j].size() == 0) j++;
-      if (j < polyInfos[i].polygons.size()) break;
-      i++;
-    }
-    if (i == polyInfos.size()) return false;
-
-    IntRect rec;
-    rec.left = polyInfos[i].polygons[j][0].X;
-    rec.right = rec.left;
-    rec.top = polyInfos[i].polygons[j][0].Y;
-    rec.bottom = rec.top;
-    for ( ; i < polyInfos.size(); ++i)
-      for (Polygons::size_type j = 0; j < polyInfos[i].polygons.size(); ++j)
-        for (Polygon::size_type k = 0; k < polyInfos[i].polygons[j].size(); ++k)
-        {
-          IntPoint ip = polyInfos[i].polygons[j][k];
-          if (ip.X < rec.left) rec.left = ip.X;
-          else if (ip.X > rec.right) rec.right = ip.X;
-          if (ip.Y < rec.top) rec.top = ip.Y;
-          else if (ip.Y > rec.bottom) rec.bottom = ip.Y;
-        }
-
-    if (scale == 0) scale = 1.0;
-    if (margin < 0) margin = 0;
-    rec.left = (long64)((double)rec.left * scale);
-    rec.top = (long64)((double)rec.top * scale);
-    rec.right = (long64)((double)rec.right * scale);
-    rec.bottom = (long64)((double)rec.bottom * scale);
-    long64 offsetX = -rec.left + margin;
-    long64 offsetY = -rec.top + margin;
-
-    ofstream file;
-    file.open(filename);
-    if (!file.is_open()) return false;
-    file.setf(ios::fixed);
-    file.precision(0);
-    file << svg_xml_start[0] <<
-      ((rec.right - rec.left) + margin*2) << "px" << svg_xml_start[1] <<
-      ((rec.bottom - rec.top) + margin*2) << "px" << svg_xml_start[2] <<
-      ((rec.right - rec.left) + margin*2) << " " <<
-      ((rec.bottom - rec.top) + margin*2) << svg_xml_start[3];
-    setlocale(LC_NUMERIC, "C");
-    file.precision(2);
-
-    for (PolyInfoList::size_type i = 0; i < polyInfos.size(); ++i)
-  {
-      file << " <path d=\"";
-    for (Polygons::size_type j = 0; j < polyInfos[i].polygons.size(); ++j)
+      if ((*polys[k])[i].size() < 3) continue;
+      file << " M " << (double)(*polys[k])[i][0].X * scale + offsetX << " "
+        << (double)(*polys[k])[i][0].Y * scale + offsetY;
+      for (clipper::Polygon::size_type j = 1; j < (*polys[k])[i].size(); j++)
       {
-        if (polyInfos[i].polygons[j].size() < 3) continue;
-        file << " M " << ((double)polyInfos[i].polygons[j][0].X * scale + offsetX) <<
-          " " << ((double)polyInfos[i].polygons[j][0].Y * scale + offsetY);
-        for (Polygon::size_type k = 1; k < polyInfos[i].polygons[j].size(); ++k)
-        {
-          IntPoint ip = polyInfos[i].polygons[j][k];
-          double x = (double)ip.X * scale;
-          double y = (double)ip.Y * scale;
-          file << " L " << (x + offsetX) << " " << (y + offsetY);
-        }
-        file << " z";
-    }
-      file << poly_end[0] << ColorToHtml(polyInfos[i].si.brushClr) <<
-    poly_end[1] << GetAlphaAsFrac(polyInfos[i].si.brushClr) <<
-        poly_end[2] <<
-        (polyInfos[i].si.pft == pftEvenOdd ? "evenodd" : "nonzero") <<
-        poly_end[3] << ColorToHtml(polyInfos[i].si.penClr) <<
-    poly_end[4] << GetAlphaAsFrac(polyInfos[i].si.penClr) <<
-        poly_end[5] << polyInfos[i].si.penWidth << poly_end[6];
-
-        if (polyInfos[i].si.showCoords)
-        {
-      file << "<g font-family=\"Verdana\" font-size=\"11\" fill=\"black\">\n\n";
-      for (Polygons::size_type j = 0; j < polyInfos[i].polygons.size(); ++j)
-      {
-        if (polyInfos[i].polygons[j].size() < 3) continue;
-        for (Polygon::size_type k = 0; k < polyInfos[i].polygons[j].size(); ++k)
-        {
-          IntPoint ip = polyInfos[i].polygons[j][k];
-          file << "<text x=\"" << (int)(ip.X * scale + offsetX) <<
-          "\" y=\"" << (int)(ip.Y * scale + offsetY) << "\">" <<
-          ip.X << "," << ip.Y << "</text>\n";
-          file << "\n";
-        }
+        double x = (double)(*polys[k])[i][j].X * scale;
+        double y = (double)(*polys[k])[i][j].Y * scale;
+        file << " L " << x + offsetX << " " << y + offsetY;
       }
-      file << "</g>\n";
-        }
+      file << " z";
     }
-    file << "</svg>\n";
-    file.close();
-    setlocale(LC_NUMERIC, "");
-    return true;
+
+    switch (k) {
+      case 0:
+        file << poly_end[0] << "#0000ff" /*fill color*/ <<
+          poly_end[1] << 0.062 /*fill opacity*/ <<
+          poly_end[2] << (subjFill == pftEvenOdd ? "evenodd" : "nonzero") <<
+          poly_end[3] << "#0099ff" /*stroke color*/ <<
+          poly_end[4] << 0.5 /*stroke opacity*/ <<
+          poly_end[5] << 0.8 /*stroke width*/ << poly_end[6];
+        break;
+      case 1:
+        file << poly_end[0] << "#ffff00" /*fill color*/ <<
+          poly_end[1] << 0.062 /*fill opacity*/ <<
+          poly_end[2] << (clipFill == pftEvenOdd ? "evenodd" : "nonzero") <<
+          poly_end[3] << "#ff9900" /*stroke color*/ <<
+          poly_end[4] << 0.5 /*stroke opacity*/ <<
+          poly_end[5] << 0.8 /*stroke width*/ << poly_end[6];
+        break;
+      default:
+        file << poly_end[0] << "#00ff00" /*fill color*/ <<
+          poly_end[1] << 0.25 /*fill opacity*/ <<
+          poly_end[2] << "nonzero" <<
+          poly_end[3] << "#003300" /*stroke color*/ <<
+          poly_end[4] << 1.0 /*stroke opacity*/ <<
+          poly_end[5] << 0.8 /*stroke width*/ << poly_end[6];
+    }
   }
-};
-//------------------------------------------------------------------------------
-
-const std::string SVGBuilder::svg_xml_start [] =
-  {"<?xml version=\"1.0\" standalone=\"no\"?>\n"
-   "<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\"\n"
-   "\"http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd\">\n\n"
-   "<svg width=\"",
-   "\" height=\"",
-   "\" viewBox=\"0 0 ",
-   "\" version=\"1.0\" xmlns=\"http://www.w3.org/2000/svg\">\n\n"
-  };
-const std::string SVGBuilder::poly_end [] =
-  {"\"\n style=\"fill:",
-   "; fill-opacity:",
-   "; fill-rule:",
-   "; stroke:",
-   "; stroke-opacity:",
-   "; stroke-width:",
-   ";\"/>\n\n"
-  };
-
-//------------------------------------------------------------------------------
+  file << svg_xml_end;
+  file.close();
+  setlocale(LC_NUMERIC, "");
+}
 //------------------------------------------------------------------------------
 
 inline long64 Round(double val)
@@ -215,7 +141,7 @@ inline long64 Round(double val)
 }
 //------------------------------------------------------------------------------
 
-bool LoadFromFile(Polygons &ppg, char * filename, double scale= 1,
+bool LoadFromFile(clipper::Polygons &ppg, char * filename, float scale= 1,
   int xOffset = 0, int yOffset = 0)
 {
   ppg.clear();
@@ -244,7 +170,7 @@ bool LoadFromFile(Polygons &ppg, char * filename, double scale= 1,
 }
 //------------------------------------------------------------------------------
 
-void SaveToConsole(const string name, const Polygons &pp, double scale = 1.0)
+void SaveToConsole(const string name, const clipper::Polygons &pp, float scale = 1)
 {
   cout << '\n' << name << ":\n"
     << pp.size() << '\n';
@@ -258,7 +184,7 @@ void SaveToConsole(const string name, const Polygons &pp, double scale = 1.0)
 }
 //---------------------------------------------------------------------------
 
-void SaveToFile(char *filename, Polygons &pp, double scale = 1)
+void SaveToFile(char *filename, clipper::Polygons &pp, float scale = 1)
 {
   FILE *f = fopen(filename, "w");
   if (!f) return;
@@ -268,13 +194,13 @@ void SaveToFile(char *filename, Polygons &pp, double scale = 1)
     fprintf(f, "%d\n", pp[i].size());
     if (scale > 1.01 || scale < 0.99) {
       for (unsigned j = 0; j < pp[i].size(); ++j)
-        fprintf(f, "%.6lf, %.6lf,\n",
+        fprintf(f, "%.4lf, %.4lf,\n",
           (double)pp[i][j].X /scale, (double)pp[i][j].Y /scale);
     }
     else
     {
       for (unsigned j = 0; j < pp[i].size(); ++j)
-        fprintf(f, "%lld, %lld,\n", pp[i][j].X, pp[i][j].Y );
+        fprintf(f, "%Ld, %Ld,\n", pp[i][j].X, pp[i][j].Y );
     }
   }
   fclose(f);
@@ -286,8 +212,8 @@ void MakeRandomPoly(int edgeCount, int width, int height, Polygons & poly)
   poly.resize(1);
   poly[0].resize(edgeCount);
   for (int i = 0; i < edgeCount; i++){
-    poly[0][i].X = rand() % width;
-    poly[0][i].Y = rand() % height;
+    poly[0][i].X = random(width);
+    poly[0][i].Y = random(height);
   }
 }
 //------------------------------------------------------------------------------
@@ -304,13 +230,15 @@ int _tmain(int argc, _TCHAR* argv[])
     int loop_cnt = 100;
     char * dummy;
     if (argc > 2) loop_cnt = strtol(argv[2], &dummy, 10);
-    if (loop_cnt == 0) loop_cnt = 100;
+
     cout << "\nPerforming " << loop_cnt << " random intersection operations ... ";
-    srand(time(0));
+    randomize();
     int error_cnt = 0;
     Polygons subject, clip, solution;
     Clipper clpr;
-    time_t time_start = clock();
+    _LARGE_INTEGER m_qpc1, m_qpc2, m_qpf;
+    QueryPerformanceFrequency(&m_qpf);
+    QueryPerformanceCounter(&m_qpc1);
     for (int i = 0; i < loop_cnt; i++) {
       MakeRandomPoly(100, 400, 400, subject);
       MakeRandomPoly(100, 400, 400, clip);
@@ -320,42 +248,28 @@ int _tmain(int argc, _TCHAR* argv[])
       if (!clpr.Execute(ctIntersection, solution, pftEvenOdd, pftEvenOdd))
         error_cnt++;
     }
-    double time_elapsed = double(clock() - time_start)/CLOCKS_PER_SEC;
-    cout << "\nFinished in " << time_elapsed << " secs with ";
+    QueryPerformanceCounter(&m_qpc2);
+    double m_elapsedTime =
+      (double)(m_qpc2.QuadPart - m_qpc1.QuadPart) / m_qpf.QuadPart;
+    cout << "\nFinished in " << m_elapsedTime << " secs with ";
     cout << error_cnt << " errors.\n\n";
-    //let's save the very last result ...
+    //let's save the very last result too ...
     SaveToFile("Subject.txt", subject);
     SaveToFile("Clip.txt", clip);
     SaveToFile("Solution.txt", solution);
-    //and see it as an image too ...
-    SVGBuilder svg;
-    svg.style.penWidth = 0.8;
-    svg.style.pft = pftEvenOdd;
-    svg.style.brushClr = 0x1200009C;
-    svg.style.penClr = 0xCCD3D3DA;
-    svg.AddPolygons(subject);
-    svg.style.brushClr = 0x129C0000;
-    svg.style.penClr = 0xCCFFA07A;
-    svg.AddPolygons(clip);
-    svg.style.brushClr = 0x6080ff9C;
-    svg.style.penClr = 0xFF003300;
-    svg.style.pft = pftNonZero;
-    svg.AddPolygons(solution);
-    svg.SaveToFile("solution.svg");
+    PolygonsToSVG("solution.svg", &subject, &clip, &solution, pftEvenOdd, pftEvenOdd);
     return 0;
   }
 
   if (argc < 3)
   {
     cout << "\nUSAGE:\n"
-      << "clipper --benchmark [LOOP_COUNT (default = 100)]\n"
-      << "or\n"
-      << "clipper sub_file clp_file CLIPTYPE [SUB_FILL CLP_FILL] [PRECISION] [SVG_SCALE]\n"
-      << "where ...\n"
-      << "  CLIPTYPE  = INTERSECTION or UNION or DIFFERENCE or XOR, and\n"
-      << "  ???_FILL  = EVENODD or NONZERO (default = NONZERO)\n"
-      << "  PRECISION = in decimal places (default = 0)\n"
-      << "  SVG_SCALE = SVG output scale (default = 1.0)\n\n";
+      << "clipper.exe --benchmark|-b [loop_count]\n"
+      << "OR\n"
+      << "clipper.exe subject_file clip_file "
+      << "[INTERSECTION | UNION | DIFFERENCE | XOR] "
+      << "[EVENODD | NONZERO] [EVENODD | NONZERO] "
+      << "[precision, in decimal places (def = 0)]\n";
     cout << "\nINPUT AND OUTPUT FILE FORMAT ([optional] {comments}):\n"
       << "Polygon Count\n"
       << "Vertex Count {first polygon}\n"
@@ -371,11 +285,7 @@ int _tmain(int argc, _TCHAR* argv[])
   int scale_log10 = 0;
   char * dummy;
   if (argc > 6) scale_log10 = strtol(argv[6], &dummy, 10);
-  double scale = std::pow(double(10), scale_log10);
-
-  double svg_scale = 1.0;
-  if (argc > 7) svg_scale = strtod(argv[7], &dummy);
-  svg_scale /= scale;
+  float scale = std::pow(double(10), scale_log10);
 
   Polygons subject, clip;
 
@@ -421,7 +331,7 @@ int _tmain(int argc, _TCHAR* argv[])
 
   //ie don't change the polygons back to the original size if we've
   //just down-sized them to a manageable (all-in-one-screen) size ...
-  //if (scale < 1) scale = 1;
+  if (scale < 1) scale = 1;
 
   SaveToConsole(s, subject, scale);
   s = "Clips (";
@@ -429,29 +339,13 @@ int _tmain(int argc, _TCHAR* argv[])
   SaveToConsole(s, clip, scale);
   if (succeeded) {
     s = "Solution (using " + sClipType[clipType] + ")";
-    //SaveToConsole(s, solution, scale);
+    SaveToConsole(s, solution, scale);
     SaveToFile("solution.txt", solution, scale);
-
-    //OffsetPolygons(solution, solution, -5.0 *scale, jtRound, 4);
-
     //let's see the result too ...
-    SVGBuilder svg;
-    svg.style.penWidth = 0.8;
-    svg.style.brushClr = 0x1200009C;
-    svg.style.penClr = 0xCCD3D3DA;
-    svg.style.pft = subj_pft;
-    svg.AddPolygons(subject);
-    svg.style.brushClr = 0x129C0000;
-    svg.style.penClr = 0xCCFFA07A;
-    svg.style.pft = clip_pft;
-    svg.AddPolygons(clip);
-    svg.style.brushClr = 0x6080ff9C;
-    svg.style.penClr = 0xFF003300;
-    svg.style.pft = pftNonZero;
-    svg.AddPolygons(solution);
-    svg.SaveToFile("solution.svg", svg_scale);
+    PolygonsToSVG("solution.svg", &subject, &clip, &solution,
+      subj_pft, clip_pft, scale);
   } else
-      cout << (sClipType[clipType] + " failed!\n\n");
+      cout << sClipType[clipType] +" failed!\n\n";
 
   return 0;
 }
