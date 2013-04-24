@@ -1,10 +1,10 @@
 /*******************************************************************************
 *                                                                              *
 * Author    :  Angus Johnson                                                   *
-* Version   :  5.1.4                                                           *
-* Date      :  24 March 2013                                                   *
+* Version   :  4.8.8                                                           *
+* Date      :  30 August 2012                                                  *
 * Website   :  http://www.angusj.com                                           *
-* Copyright :  Angus Johnson 2010-2013                                         *
+* Copyright :  Angus Johnson 2010-2012                                         *
 *                                                                              *
 * License:                                                                     *
 * Use, modification & distribution is subject to Boost Software License Ver 1. *
@@ -26,7 +26,7 @@
 * Paper no. DETC2005-85513 pp. 565-575                                         *
 * ASME 2005 International Design Engineering Technical Conferences             *
 * and Computers and Information in Engineering Conference (IDETC/CIE2005)      *
-* September 24-28, 2005 , Long Beach, California, USA                          *
+* September 24–28, 2005 , Long Beach, California, USA                          *
 * http://www.me.berkeley.edu/~mcmains/pubs/DAC05OffsetPolygon.pdf              *
 *                                                                              *
 *******************************************************************************/
@@ -64,64 +64,30 @@ public:
 typedef std::vector< IntPoint > Polygon;
 typedef std::vector< Polygon > Polygons;
 
-
 std::ostream& operator <<(std::ostream &s, Polygon &p);
 std::ostream& operator <<(std::ostream &s, Polygons &p);
 
-class PolyNode;
-typedef std::vector< PolyNode* > PolyNodes;
-
-class PolyNode 
-{ 
-public:
-    PolyNode();
-    Polygon Contour;
-    PolyNodes Childs;
-    PolyNode* Parent;
-    PolyNode* GetNext() const;
-    bool IsHole() const;
-    int ChildCount() const;
-private:
-    PolyNode* GetNextSiblingUp() const;
-    unsigned Index; //node index in Parent.Childs
-    void AddChild(PolyNode& child);
-    friend class Clipper; //to access Index
+struct ExPolygon {
+  Polygon  outer;
+  Polygons holes;
 };
+typedef std::vector< ExPolygon > ExPolygons;
 
-class PolyTree: public PolyNode
-{ 
-public:
-    ~PolyTree(){Clear();};
-    PolyNode* GetFirst() const;
-    void Clear();
-    int Total() const;
-private:
-    PolyNodes AllNodes;
-    friend class Clipper; //to access AllNodes
-};
-        
 enum JoinType { jtSquare, jtRound, jtMiter };
 
 bool Orientation(const Polygon &poly);
 double Area(const Polygon &poly);
-
 void OffsetPolygons(const Polygons &in_polys, Polygons &out_polys,
-  double delta, JoinType jointype = jtSquare, double limit = 0, bool autoFix = true);
-
+  double delta, JoinType jointype = jtSquare, double MiterLimit = 2);
 void SimplifyPolygon(const Polygon &in_poly, Polygons &out_polys, PolyFillType fillType = pftEvenOdd);
 void SimplifyPolygons(const Polygons &in_polys, Polygons &out_polys, PolyFillType fillType = pftEvenOdd);
 void SimplifyPolygons(Polygons &polys, PolyFillType fillType = pftEvenOdd);
-
-void CleanPolygon(Polygon& in_poly, Polygon& out_poly, double distance = 1.415);
-void CleanPolygons(Polygons& in_polys, Polygons& out_polys, double distance = 1.415);
-
-void PolyTreeToPolygons(PolyTree& polytree, Polygons& polygons);
 
 void ReversePolygon(Polygon& p);
 void ReversePolygons(Polygons& p);
 
 //used internally ...
-enum EdgeSide { esLeft = 1, esRight = 2};
+enum EdgeSide { esNeither = 0, esLeft = 1, esRight = 2, esBoth = 3 };
 enum IntersectProtects { ipNone = 0, ipLeft = 1, ipRight = 2, ipBoth = 3 };
 
 struct TEdge {
@@ -132,8 +98,7 @@ struct TEdge {
   long64 xtop;
   long64 ytop;
   double dx;
-  long64 deltaX;
-  long64 deltaY;
+  long64 tmpX;
   PolyType polyType;
   EdgeSide side;
   int windDelta; //1 or -1 depending on winding direction
@@ -173,10 +138,12 @@ struct OutPt; //forward declaration
 struct OutRec {
   int     idx;
   bool    isHole;
-  OutRec *FirstLeft;  //see comments in clipper.pas
-  PolyNode *polyNode;
+  OutRec *FirstLeft;
+  OutRec *AppendLink;
   OutPt  *pts;
   OutPt  *bottomPt;
+  OutPt  *bottomFlag;
+  EdgeSide sides;
 };
 
 struct OutPt {
@@ -237,19 +204,19 @@ public:
   Clipper();
   ~Clipper();
   bool Execute(ClipType clipType,
-    Polygons &solution,
-    PolyFillType subjFillType = pftEvenOdd,
-    PolyFillType clipFillType = pftEvenOdd);
+  Polygons &solution,
+  PolyFillType subjFillType = pftEvenOdd,
+  PolyFillType clipFillType = pftEvenOdd);
   bool Execute(ClipType clipType,
-    PolyTree &polytree,
-    PolyFillType subjFillType = pftEvenOdd,
-    PolyFillType clipFillType = pftEvenOdd);
+  ExPolygons &solution,
+  PolyFillType subjFillType = pftEvenOdd,
+  PolyFillType clipFillType = pftEvenOdd);
   void Clear();
   bool ReverseSolution() {return m_ReverseOutput;};
   void ReverseSolution(bool value) {m_ReverseOutput = value;};
 protected:
   void Reset();
-  virtual bool ExecuteInternal();
+  virtual bool ExecuteInternal(bool fixHoleLinkages);
 private:
   PolyOutList       m_PolyOuts;
   JoinList          m_Joins;
@@ -258,12 +225,11 @@ private:
   Scanbeam         *m_Scanbeam;
   TEdge           *m_ActiveEdges;
   TEdge           *m_SortedEdges;
-  IntersectNode   *m_IntersectNodes;
-  bool             m_ExecuteLocked;
-  PolyFillType     m_ClipFillType;
-  PolyFillType     m_SubjFillType;
-  bool             m_ReverseOutput;
-  bool             m_UsingPolyTree; 
+  IntersectNode    *m_IntersectNodes;
+  bool              m_ExecuteLocked;
+  PolyFillType      m_ClipFillType;
+  PolyFillType      m_SubjFillType;
+  bool              m_ReverseOutput;
   void DisposeScanbeamList();
   void SetWindingCount(TEdge& edge);
   bool IsEvenOddFillType(const TEdge& edge) const;
@@ -291,9 +257,10 @@ private:
   void DoEdge2(TEdge *edge1, TEdge *edge2, const IntPoint &pt);
   void DoBothEdges(TEdge *edge1, TEdge *edge2, const IntPoint &pt);
   void IntersectEdges(TEdge *e1, TEdge *e2,
-    const IntPoint &pt, const IntersectProtects protects);
+    const IntPoint &pt, IntersectProtects protects);
   OutRec* CreateOutRec();
   void AddOutPt(TEdge *e, const IntPoint &pt);
+  void DisposeBottomPt(OutRec &outRec);
   void DisposeAllPolyPts();
   void DisposeOutRec(PolyOutList::size_type index);
   bool ProcessIntersections(const long64 botY, const long64 topY);
@@ -302,22 +269,20 @@ private:
   void ProcessIntersectList();
   void ProcessEdgesAtTopOfScanbeam(const long64 topY);
   void BuildResult(Polygons& polys);
-  void BuildResult2(PolyTree& polytree);
+  void BuildResultEx(ExPolygons& polys);
   void SetHoleState(TEdge *e, OutRec *OutRec);
   void DisposeIntersectNodes();
-  bool FixupIntersectionOrder();
+  bool FixupIntersections();
   void FixupOutPolygon(OutRec &outRec);
   bool IsHole(TEdge *e);
-  void FixHoleLinkage(OutRec &outRec);
+  void FixHoleLinkage(OutRec *outRec);
+  void CheckHoleLinkages1(OutRec *outRec1, OutRec *outRec2);
+  void CheckHoleLinkages2(OutRec *outRec1, OutRec *outRec2);
   void AddJoin(TEdge *e1, TEdge *e2, int e1OutIdx = -1, int e2OutIdx = -1);
   void ClearJoins();
   void AddHorzJoin(TEdge *e, int idx);
   void ClearHorzJoins();
-  bool JoinPoints(const JoinRec *j, OutPt *&p1, OutPt *&p2);
-  void FixupJoinRecs(JoinRec *j, OutPt *pt, unsigned startIdx);
-  void JoinCommonEdges();
-  void FixupFirstLefts1(OutRec* OldOutRec, OutRec* NewOutRec);
-  void FixupFirstLefts2(OutRec* OldOutRec, OutRec* NewOutRec);
+  void JoinCommonEdges(bool fixHoleLinkages);
 };
 
 //------------------------------------------------------------------------------

@@ -18,6 +18,7 @@ namespace WindowsFormsApplication1
 
     using Polygon = List<IntPoint>;
     using Polygons = List<List<IntPoint>>;
+    using ExPolygons = List<ExPolygon>;
 
     public partial class Form1 : Form
     {
@@ -29,6 +30,7 @@ namespace WindowsFormsApplication1
         private Polygons subjects;
         private Polygons clips;
         private Polygons solution;
+        private ExPolygons exSolution;
 
         //Here we are scaling all coordinates up by 100 when they're passed to Clipper 
         //via Polygon (or Polygons) objects because Clipper no longer accepts floating  
@@ -450,6 +452,7 @@ namespace WindowsFormsApplication1
                 Clipper c = new Clipper();
                 c.AddPolygons(subjects, PolyType.ptSubject);
                 c.AddPolygons(clips, PolyType.ptClip);
+                exSolution.Clear();
                 solution.Clear();
                 bool succeeded = c.Execute(GetClipType(), solution, GetPolyFillType(), GetPolyFillType());
                 if (succeeded)
@@ -551,6 +554,7 @@ namespace WindowsFormsApplication1
             subjects = new Polygons(); 
             clips = new Polygons();
             solution = new Polygons();
+            exSolution = new ExPolygons();
 
             toolStripStatusLabel1.Text =
                 "Tip: Use the mouse-wheel (or +,-,0) to adjust the offset of the solution polygons.";
