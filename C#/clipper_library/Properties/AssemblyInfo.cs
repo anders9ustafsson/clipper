@@ -8,9 +8,9 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyTitle("clipper_library")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("Angus Johnson")]
+[assembly: AssemblyCompany("Microsoft")]
 [assembly: AssemblyProduct("clipper_library")]
-[assembly: AssemblyCopyright("Copyright © Angus Johnson 2010-14")]
+[assembly: AssemblyCopyright("Copyright © Microsoft 2011")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 

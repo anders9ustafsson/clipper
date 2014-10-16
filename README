@@ -2,32 +2,6 @@
 Clipper Change Log
 =====================================================================
 
-v6.2.0 (28 September 2014)
-
-* Numerous bugfixes - too many to list. 
-  See revisions 454-475 in Sourceforge Repository.
-* Parameters changed in the custom callback function that can be 
-  assigned to ZFillFunction. Curves demo temporarily removed.
-* Deprecated functions have been removed. 
-
-v6.1.5 (26 February 2014)
-* Improved the joining of output polygons sharing a common edge 
-  when those common edges are horizontal.
-* Fixed a bug in ClipperOffset.AddPath() which would produce
-  incorrect solutions when open paths were added before closed paths.
-* Minor code tidy and performance improvement
-
-v6.1.4 (6 February 2014)
-* Fixed bugs in MinkowskiSum
-* Fixed minor bug when using Clipper.ForceSimplify.
-* Modified use_xyz callback so that all 4 vertices around an
-  intersection point are now passed to the callback function.
-
-v6.1.3a (22 January 2014)
-* Fixed buggy PointInPolygon function (C++ and C# only). 
-  Note this bug only affected the newly exported function, the 
-  internal PointInPolygon function used by Clipper was OK.
- 
 v6.1.3 (19 January 2014)
 * Fixed potential endless loop condition when adding open 
   paths to Clipper.
